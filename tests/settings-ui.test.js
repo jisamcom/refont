@@ -57,4 +57,24 @@ describe('live preview wiring', () => {
     rScale.value = '2'; rScale.dispatchEvent(new Event('input'));
     expect(parseFloat(root.querySelector('#sEn').style.fontSize)).toBeGreaterThan(20);
   });
+
+  it('syncs the value chips to loaded settings on mount (not just on input)', () => {
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1,
+      settings: { ...DEFAULTS, scale: 1.5, minSize: 18, lineHeight: 1.8, letterSpacing: 0.5, weight: 0 } });
+    expect(root.querySelector('#vScale').textContent).toBe('1.50×');
+    expect(root.querySelector('#vMin').textContent).toBe('18px');
+    expect(root.querySelector('#vMin').classList.contains('off')).toBe(false);
+    expect(root.querySelector('#vLh').textContent).toBe('1.80');
+    expect(root.querySelector('#vLs').textContent).toBe('0.5px');
+    expect(root.querySelector('#vWeight').textContent).toBe('원본'); // weight:0 preserved
+  });
+
+  it('marks the Korean section titles with the .kr class for readable Pretendard', () => {
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1, settings: { ...DEFAULTS } });
+    const krTitles = [...root.querySelectorAll('.sec-h .t.kr')].map((e) => e.textContent);
+    expect(krTitles).toContain('이 사이트 제외');
+    expect(krTitles).toContain('보호 폰트');
+  });
 });
