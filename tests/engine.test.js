@@ -1,6 +1,22 @@
 // tests/engine.test.js
 import { describe, it, expect } from 'vitest';
-import { fontStack, buildCss, computeElementInline } from '../src/lib/engine.js';
+import { sanitizeFamilyName, fontStack, buildCss, computeElementInline } from '../src/lib/engine.js';
+
+describe('sanitizeFamilyName', () => {
+  it('strips double-quote, backslash, semicolon, braces, and angle brackets', () => {
+    expect(sanitizeFamilyName('"Evil\\;{}<>')).not.toMatch(/["\\;{}<>]/);
+  });
+  it('trims surrounding whitespace', () => {
+    expect(sanitizeFamilyName('  Pretendard  ')).toBe('Pretendard');
+  });
+  it('returns empty string for null/undefined', () => {
+    expect(sanitizeFamilyName(null)).toBe('');
+    expect(sanitizeFamilyName(undefined)).toBe('');
+  });
+  it('leaves a clean name unchanged', () => {
+    expect(sanitizeFamilyName('My Font')).toBe('My Font');
+  });
+});
 
 describe('fontStack', () => {
   it('puts the chosen font first, then emoji fonts, then generic', () => {

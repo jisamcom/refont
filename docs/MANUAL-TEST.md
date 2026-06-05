@@ -35,3 +35,7 @@
 - [ ] Web font by direct .woff2 URL works on a CSP-strict site (data URL path)
 - [ ] Options export → import round-trips settings
 - [ ] SPA (e.g. YouTube/Twitter) — new content gets the font as you scroll
+
+## Known limitations (v0.1)
+- **Google Fonts / CSS-link web fonts under strict CSP:** the `@import` route is subject to the page's `style-src`/`font-src` CSP and may be blocked. For CSP-strict sites, use a direct font-file URL (`.woff2/.ttf/.otf`) — that path fetches in the background and injects a `data:` `@font-face`, which bypasses CSP.
+- **Per-host selector exclusions (`manualExclusions`)** are not yet editable in the options UI; they can be set via settings Import for now. For protecting a font family that the auto-detector missed, use the "보호 폰트 추가" (protection denylist) field in options.

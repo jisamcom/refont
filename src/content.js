@@ -2,8 +2,8 @@
 import browser from 'webextension-polyfill';
 import { MSG } from './lib/messaging.js';
 import { isBlocked } from './lib/url-match.js';
-import { buildCss, computeElementInline } from './lib/engine.js';
-import { shouldProtect } from './lib/font-protection.js';
+import { buildCss, computeElementInline, sanitizeFamilyName } from './lib/engine.js';
+import { shouldProtect, hasIconClassHint } from './lib/font-protection.js';
 import { directText, isCodeElement } from './lib/dom-utils.js';
 
 let settings = null;
@@ -23,20 +23,22 @@ function processElement(el) {
   const cs = getComputedStyle(el);
   const fontFamily = cs.fontFamily;
   const className = el.getAttribute('class') || '';
+  const pseudoFontFamily = hasIconClassHint(className)
+    ? `${pseudoFamily(el, '::before')} ${pseudoFamily(el, '::after')}`
+    : '';
   const info = {
     fontFamily,
-    pseudoFontFamily: `${pseudoFamily(el, '::before')} ${pseudoFamily(el, '::after')}`,
+    pseudoFontFamily,
     className,
     text,
   };
   const extra = settings.protectionDenylistExtra || [];
   if (shouldProtect(info, extra) || matchesManualExclusion(el)) return;
 
-  if (settings.codeFont && isCodeElement(el, fontFamily)) {
-    el.setAttribute('data-fc-code', '');
-  } else {
-    el.setAttribute('data-fc', '');
-  }
+  const isCode = isCodeElement(el, fontFamily);
+  const useCode = settings.codeFont && settings.codeFont.name;
+  if (isCode && !useCode) return; // no code font set → leave code untouched
+  el.setAttribute(isCode ? 'data-fc-code' : 'data-fc', '');
 
   const inline = computeElementInline(
     { fontSize: parseFloat(cs.fontSize) || 0, fontWeight: parseInt(cs.fontWeight, 10) || 400 },
@@ -69,7 +71,7 @@ function startObserver() {
   observer = new MutationObserver((muts) => {
     for (const m of muts) {
       for (const n of m.addedNodes) {
-        if (n.nodeType === 1) { processElement(n); scan(n); }
+        if (n.nodeType === 1) { scan(n); }
       }
       if (m.type === 'characterData' && m.target.parentElement) {
         processElement(m.target.parentElement);
@@ -84,8 +86,10 @@ function startObserver() {
 async function injectWebFont() {
   const bf = settings.bodyFont;
   if (!bf || bf.source !== 'weburl' || !bf.url) return;
+  let parsed;
+  try { parsed = new URL(bf.url); } catch { return; }
+  if (!/^https?:$/.test(parsed.protocol)) return;
   const styleId = '__refont_webfont';
-  if (document.getElementById(styleId)) return;
   const style = document.createElement('style');
   style.id = styleId;
   if (bf.urlType === 'css') {
@@ -93,7 +97,7 @@ async function injectWebFont() {
   } else {
     try {
       const dataUrl = await browser.runtime.sendMessage({ type: MSG.FETCH_FONT, url: bf.url });
-      style.textContent = `@font-face{font-family:"${bf.name}";src:url(${dataUrl});font-display:swap;}`;
+      style.textContent = `@font-face{font-family:"${sanitizeFamilyName(bf.name)}";src:url(${dataUrl});font-display:swap;}`;
     } catch { return; }
   }
   (document.head || document.documentElement).appendChild(style);
@@ -115,18 +119,19 @@ async function apply() {
   if (observer) { observer.disconnect(); observer = null; }
   clearMarks();
   if (appliedCss) { await browser.runtime.sendMessage({ type: MSG.REMOVE_CSS, css: appliedCss }); appliedCss = ''; }
+  const oldWebFont = document.getElementById('__refont_webfont'); if (oldWebFont) oldWebFont.remove();
 
   if (!active) return;
 
   appliedCss = buildCss(settings);
   await browser.runtime.sendMessage({ type: MSG.APPLY_CSS, css: appliedCss });
   await injectWebFont();
-  scan(document.documentElement);
   startObserver();
+  scan(document.documentElement);
 }
 
 browser.runtime.onMessage.addListener((msg) => {
   if (msg && msg.type === MSG.REAPPLY) apply();
 });
 
-apply();
+apply().catch(() => {});
