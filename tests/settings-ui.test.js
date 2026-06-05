@@ -78,3 +78,18 @@ describe('live preview wiring', () => {
     expect(krTitles).toContain('보호 폰트');
   });
 });
+
+describe('font pickers', () => {
+  it('mounts body + code pickers and updates state.family on pick', () => {
+    const root = document.createElement('div');
+    const api = mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1,
+      settings: { ...DEFAULTS, bodyFont: { source: 'system', name: 'Georgia', url: null, urlType: 'css' } },
+      installedFonts: ['Georgia', 'Batang'], monoFonts: ['Consolas'] });
+    expect(root.querySelector('#bodyPicker .fp-btn')).toBeTruthy();
+    expect(root.querySelector('#bodyPicker .fp-name').textContent).toBe('Georgia');
+    root.querySelector('#bodyPicker .fp-btn').click();
+    const batang = [...root.querySelectorAll('#bodyPicker .o-name')].find((n) => n.textContent === '바탕');
+    batang.closest('.fp-opt').click();
+    expect(api.state.family).toBe('Batang');
+  });
+});

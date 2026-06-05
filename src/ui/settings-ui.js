@@ -3,7 +3,8 @@ import browser from 'webextension-polyfill';
 import { MSG } from '../lib/messaging.js';
 import { DEFAULTS } from '../lib/storage.js';
 import { parseAxes } from '../lib/engine.js';
-import { labelOf } from './font-names.js';
+import { labelOf, toOptions } from './font-names.js';
+import { makeFontPicker } from './font-picker.js';
 
 // ---- pure mapping (unit-tested) ----
 export function settingsToState(s) {
@@ -320,7 +321,85 @@ export function mountSettingsUI(root, ctx) {
   markTicks();
   applyPreview();
 
-  // Wiring for pickers/sections/actions is added in later tasks. Expose for those tasks/tests:
+  // ---- font pickers (body + code) ----
+  const bodyOpts = toOptions(ctx.installedFonts || []);
+  const monoOpts = toOptions(ctx.monoFonts || []);
+
+  const bp = makeFontPicker($('bodyPicker'), {
+    fonts: bodyOpts,
+    value: state.family || 'Pretendard Variable',
+    sample: 'Aa가',
+    onChange: (f) => { state.family = f; applyPreview(); },
+  });
+
+  function updateCodePrev(f) {
+    root.querySelectorAll('#codePrev .ln').forEach((l) => { l.style.fontFamily = "'" + f + "', ui-monospace, monospace"; });
+  }
+
+  const cp = makeFontPicker($('codePicker'), {
+    fonts: monoOpts,
+    value: state.codeFamily || 'Consolas',
+    sample: '{ }',
+    onChange: (f) => { state.codeFamily = f; updateCodePrev(f); },
+  });
+  updateCodePrev(state.codeFamily || 'Consolas');
+
+  // ---- source segmented control ----
+  function reflectSource(source) {
+    [...$('srcSeg').querySelectorAll('button')].forEach((b) => {
+      b.setAttribute('aria-selected', String(b.dataset.src === source));
+    });
+    $('srcSystem').hidden = (source !== 'system');
+    $('srcWeb').hidden = (source === 'system');
+  }
+  $('srcSeg').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    state.source = b.dataset.src;
+    reflectSource(state.source);
+  });
+  reflectSource(state.source);
+
+  // ---- web-type segmented control ----
+  function reflectWebType(urlType) {
+    [...$('webTypeSeg').querySelectorAll('button')].forEach((b) => {
+      b.setAttribute('aria-selected', String(b.dataset.wt === urlType));
+    });
+    $('webFamilyWrap').hidden = (urlType !== 'file');
+    $('webUrl').placeholder = (urlType === 'file')
+      ? 'https://example.com/font.woff2'
+      : 'https://fonts.googleapis.com/css2?family=…';
+  }
+  $('webTypeSeg').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    state.urlType = b.dataset.wt;
+    reflectWebType(state.urlType);
+  });
+  reflectWebType(state.urlType);
+
+  // ---- web inputs ----
+  $('webUrl').value = state.url;
+  $('webUrl').addEventListener('input', (e) => { state.url = e.target.value; });
+  $('webFamily').value = (state.source === 'weburl') ? state.family : '';
+  $('webFamily').addEventListener('input', (e) => { state.family = e.target.value; });
+
+  // ---- code check ----
+  toggleCheck($('ckCode'), (on) => { state.codeEnabled = on; $('codeWrap').hidden = !on; });
+  const ckCode = $('ckCode');
+  ckCode.setAttribute('aria-checked', String(!!state.codeEnabled));
+  ckCode.classList.toggle('on', !!state.codeEnabled);
+  $('codeWrap').hidden = !state.codeEnabled;
+
+  // ---- late web-font repaint (fonts may load after mount) ----
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => {
+      bp.refresh && bp.refresh();
+      cp.refresh && cp.refresh();
+    });
+  }
+
+  // Wiring for sections/actions is added in later tasks. Expose for those tasks/tests:
   const api = { root, ctx, state, applyPreview };
   return api;
 }
