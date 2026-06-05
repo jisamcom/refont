@@ -3,8 +3,9 @@ import browser from 'webextension-polyfill';
 import { MSG } from './lib/messaging.js';
 import { isBlocked } from './lib/url-match.js';
 import { buildCss, computeElementInline, sanitizeFamilyName } from './lib/engine.js';
-import { shouldProtect, hasIconClassHint } from './lib/font-protection.js';
+import { shouldProtect, hasIconClassHint, isProtectedFamily } from './lib/font-protection.js';
 import { directText, isCodeElement } from './lib/dom-utils.js';
+import { dedupeClassify } from './lib/page-fonts.js';
 
 let settings = null;
 let observer = null;
@@ -65,6 +66,21 @@ function scan(root) {
     processElement(node);
     node = walker.nextNode();
   }
+}
+
+function collectPageFonts() {
+  const raw = [];
+  const walker = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_ELEMENT);
+  let node = walker.currentNode.nodeType === 1 ? walker.currentNode : walker.nextNode();
+  while (node) {
+    if (!SKIP_TAGS.has(node.tagName)) {
+      const t = directText(node);
+      if (t && t.trim()) { try { raw.push(getComputedStyle(node).fontFamily); } catch {} }
+    }
+    node = walker.nextNode();
+  }
+  const extra = (settings && settings.protectionDenylistExtra) || [];
+  return dedupeClassify(raw, (name) => isProtectedFamily(name, extra));
 }
 
 function startObserver() {
@@ -133,7 +149,10 @@ async function apply() {
 }
 
 browser.runtime.onMessage.addListener((msg) => {
-  if (msg && msg.type === MSG.REAPPLY) apply();
+  if (!msg) return undefined;
+  if (msg.type === MSG.REAPPLY) { apply(); return undefined; }
+  if (msg.type === MSG.GET_PAGE_FONTS) return Promise.resolve(collectPageFonts());
+  return undefined;
 });
 
 apply().catch(() => {});
