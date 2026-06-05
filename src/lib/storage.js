@@ -1,7 +1,7 @@
 // src/lib/storage.js
 import browser from 'webextension-polyfill';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const DEFAULTS = {
   schemaVersion: SCHEMA_VERSION,
@@ -19,6 +19,7 @@ export const DEFAULTS = {
   blocklist: [],
   manualExclusions: {},
   protectionDenylistExtra: [],
+  recentFonts: { body: [], code: [] }, // recently picked fonts, per picker kind
 };
 
 // Merge stored settings over DEFAULTS (forward-compatible). Future schema
