@@ -1,4 +1,4 @@
-# Font Changer Extension Implementation Plan
+# Refont Extension Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -66,7 +66,7 @@ dist/
 
 ```json
 {
-  "name": "font-changer",
+  "name": "refont",
   "version": "0.1.0",
   "description": "Replace page fonts everywhere except functional fonts (icons, math, barcode, ...).",
   "type": "module",
@@ -1256,7 +1256,7 @@ function startObserver() {
 async function injectWebFont() {
   const bf = settings.bodyFont;
   if (!bf || bf.source !== 'weburl' || !bf.url) return;
-  const styleId = '__fontchanger_webfont';
+  const styleId = '__refont_webfont';
   if (document.getElementById(styleId)) return;
   const style = document.createElement('style');
   style.id = styleId;
@@ -1368,7 +1368,7 @@ Expected: FAIL — cannot resolve `../src/options.js`.
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
-  <title>Font Changer 설정</title>
+  <title>Refont 설정</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; }
     fieldset { margin-bottom: 16px; border: 1px solid #ddd; border-radius: 8px; }
@@ -1383,7 +1383,7 @@ Expected: FAIL — cannot resolve `../src/options.js`.
   </style>
 </head>
 <body>
-  <h1>Font Changer</h1>
+  <h1>Refont</h1>
 
   <fieldset>
     <legend>본문 폰트</legend>
@@ -1569,7 +1569,7 @@ async function init() {
     const blob = new Blob([serializeSettings(cur)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'font-changer-settings.json';
+    a.download = 'refont-settings.json';
     a.click();
   });
 
@@ -1687,7 +1687,7 @@ git commit -m "feat: popup with per-site toggle"
 ```json
 {
   "manifest_version": 3,
-  "name": "Font Changer",
+  "name": "Refont",
   "version": "0.1.0",
   "description": "Replace page fonts everywhere except functional fonts (icons, math, barcode, ...).",
   "permissions": ["storage", "scripting", "activeTab", "tabs"],
@@ -1696,7 +1696,7 @@ git commit -m "feat: popup with per-site toggle"
   "content_scripts": [
     { "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_start", "all_frames": true }
   ],
-  "action": { "default_popup": "popup.html", "default_title": "Font Changer" },
+  "action": { "default_popup": "popup.html", "default_title": "Refont" },
   "options_ui": { "page": "options.html", "open_in_tab": true },
   "commands": {
     "toggle-site": {
@@ -1713,7 +1713,7 @@ git commit -m "feat: popup with per-site toggle"
 ```json
 {
   "manifest_version": 3,
-  "name": "Font Changer",
+  "name": "Refont",
   "version": "0.1.0",
   "description": "Replace page fonts everywhere except functional fonts (icons, math, barcode, ...).",
   "permissions": ["storage", "scripting", "activeTab", "tabs"],
@@ -1722,7 +1722,7 @@ git commit -m "feat: popup with per-site toggle"
   "content_scripts": [
     { "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_start", "all_frames": true }
   ],
-  "action": { "default_popup": "popup.html", "default_title": "Font Changer" },
+  "action": { "default_popup": "popup.html", "default_title": "Refont" },
   "options_ui": { "page": "options.html", "open_in_tab": true },
   "commands": {
     "toggle-site": {
@@ -1731,7 +1731,7 @@ git commit -m "feat: popup with per-site toggle"
     }
   },
   "icons": { "16": "icons/icon-16.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
-  "browser_specific_settings": { "gecko": { "id": "font-changer@jisam", "strict_min_version": "115.0" } }
+  "browser_specific_settings": { "gecko": { "id": "refont@jisam", "strict_min_version": "115.0" } }
 }
 ```
 
