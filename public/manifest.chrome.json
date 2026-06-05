@@ -3,7 +3,7 @@
   "name": "Refont",
   "version": "0.1.0",
   "description": "Replace page fonts everywhere except functional fonts (icons, math, barcode, ...).",
-  "permissions": ["storage", "scripting", "activeTab", "tabs"],
+  "permissions": ["storage", "scripting", "tabs"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [

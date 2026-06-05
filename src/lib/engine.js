@@ -3,8 +3,12 @@
 
 const EMOJI_FONTS = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji"';
 
+export function sanitizeFamilyName(name) {
+  return String(name || '').replace(/["\\;{}<>]/g, '').trim();
+}
+
 export function fontStack(name, generic = 'sans-serif') {
-  const safe = String(name || '').replace(/["\\;{}<>]/g, '').trim();
+  const safe = sanitizeFamilyName(name);
   if (!safe) return `${EMOJI_FONTS}, ${generic}`;
   return `"${safe}", ${EMOJI_FONTS}, ${generic}`;
 }
