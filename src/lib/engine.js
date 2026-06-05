@@ -13,6 +13,19 @@ export function fontStack(name, generic = 'sans-serif') {
   return `"${safe}", ${EMOJI_FONTS}, ${generic}`;
 }
 
+// Parse "opsz 14, wdth 80, slnt -6" -> [{tag:'opsz', val:'14'}, ...]. Drops malformed pairs.
+export function parseAxes(str) {
+  return String(str || '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map((x) => {
+      const m = x.match(/^([A-Za-z]{2,4})\s+(-?\d+(?:\.\d+)?)$/);
+      return m ? { tag: m[1], val: m[2] } : null;
+    })
+    .filter(Boolean);
+}
+
 // Returns a user-origin stylesheet string. Targets only opted-in [data-fc]/[data-fc-code].
 export function buildCss(settings) {
   const s = settings || {};
@@ -27,6 +40,11 @@ export function buildCss(settings) {
   }
   if (s.letterSpacing && s.letterSpacing !== 0) {
     rules.push(`[data-fc]{letter-spacing:${s.letterSpacing}px !important;}`);
+  }
+  const axes = parseAxes(s.axes);
+  if (axes.length) {
+    const decl = axes.map((a) => `'${a.tag}' ${a.val}`).join(',');
+    rules.push(`[data-fc]{font-variation-settings:${decl} !important;}`);
   }
   return rules.join('\n');
 }

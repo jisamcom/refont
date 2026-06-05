@@ -1,6 +1,6 @@
 // tests/engine.test.js
 import { describe, it, expect } from 'vitest';
-import { sanitizeFamilyName, fontStack, buildCss, computeElementInline } from '../src/lib/engine.js';
+import { sanitizeFamilyName, fontStack, buildCss, computeElementInline, parseAxes } from '../src/lib/engine.js';
 
 describe('sanitizeFamilyName', () => {
   it('strips double-quote, backslash, semicolon, braces, and angle brackets', () => {
@@ -74,5 +74,33 @@ describe('computeElementInline', () => {
   });
   it('never sets weight when weight is 0', () => {
     expect(computeElementInline({ fontSize: 16, fontWeight: 400 }, { weight: 0 }).fontWeight).toBeUndefined();
+  });
+});
+
+describe('parseAxes', () => {
+  it('parses comma-separated tag/value pairs', () => {
+    expect(parseAxes('opsz 14, wdth 80')).toEqual([
+      { tag: 'opsz', val: '14' }, { tag: 'wdth', val: '80' },
+    ]);
+  });
+  it('keeps negative and decimal values', () => {
+    expect(parseAxes('slnt -6, GRAD 0.5')).toEqual([
+      { tag: 'slnt', val: '-6' }, { tag: 'GRAD', val: '0.5' },
+    ]);
+  });
+  it('drops malformed fragments and handles empty', () => {
+    expect(parseAxes('opsz, wdth 80, , junk')).toEqual([{ tag: 'wdth', val: '80' }]);
+    expect(parseAxes('')).toEqual([]);
+    expect(parseAxes(undefined)).toEqual([]);
+  });
+});
+
+describe('buildCss font-variation-settings', () => {
+  it('omits the rule when no axes', () => {
+    expect(buildCss({ bodyFont: { name: 'A' }, axes: '' })).not.toContain('font-variation-settings');
+  });
+  it('emits parsed axes with !important when present', () => {
+    const css = buildCss({ bodyFont: { name: 'A' }, axes: 'opsz 14, wdth 80' });
+    expect(css).toMatch(/\[data-fc\]\{font-variation-settings:'opsz' 14,'wdth' 80 !important;\}/);
   });
 });
