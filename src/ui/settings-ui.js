@@ -146,7 +146,7 @@ const MARKUP = `<div class="popup" id="popup">
 
       <!-- SCOPE / blocklist -->
       <section>
-        <div class="sec-h"><span class="t">이 사이트 제외</span><span class="rule"></span></div>
+        <div class="sec-h"><span class="t kr">이 사이트 제외</span><span class="rule"></span></div>
         <div class="site">
           <span class="host" id="curHost"><span class="scheme">https://</span>news.example.com<span class="scheme">/article/2026</span></span>
           <button class="btn-add" id="addHost">+ 추가</button>
@@ -157,7 +157,7 @@ const MARKUP = `<div class="popup" id="popup">
 
       <!-- PROTECTION -->
       <section>
-        <div class="sec-h"><span class="t">보호 폰트</span><span class="rule"></span><span class="hint">이 페이지에서 사용 중</span></div>
+        <div class="sec-h"><span class="t kr">보호 폰트</span><span class="rule"></span><span class="hint">이 페이지에서 사용 중</span></div>
         <div class="chips" id="pageFonts"></div>
         <details class="adv" open>
           <summary>수동 보호 목록</summary>
@@ -236,21 +236,27 @@ export function mountSettingsUI(root, ctx) {
 
   const rScale = $('rScale'), rMin = $('rMin'), rLh = $('rLh'), rLs = $('rLs'), rWeight = $('rWeight');
 
-  wire(rScale, () => { state.scale = +rScale.value; $('vScale').textContent = state.scale.toFixed(2) + '×'; });
-  wire(rMin, () => {
+  // Named updaters so the value chips can also be synced on load (not just on input).
+  const updScale = () => { state.scale = +rScale.value; $('vScale').textContent = state.scale.toFixed(2) + '×'; };
+  const updMin = () => {
     state.minSize = +rMin.value;
     const v = $('vMin');
     if (state.minSize === 0) { v.textContent = '끔'; v.classList.add('off'); }
     else { v.textContent = state.minSize + 'px'; v.classList.remove('off'); }
-  });
-  wire(rLh, () => {
+  };
+  const updLh = () => {
     state.lineHeight = +rLh.value;
     const v = $('vLh');
     if (state.lineHeight === 0) { v.textContent = '끔'; v.classList.add('off'); }
     else { v.textContent = state.lineHeight.toFixed(2); v.classList.remove('off'); }
-  });
-  wire(rLs, () => { state.letterSpacing = +rLs.value; $('vLs').textContent = state.letterSpacing.toFixed(1) + 'px'; });
-  wire(rWeight, () => { state.weight = +rWeight.value; $('vWeight').textContent = state.weight; markTicks(); });
+  };
+  const updLs = () => { state.letterSpacing = +rLs.value; $('vLs').textContent = state.letterSpacing.toFixed(1) + 'px'; };
+  const updWeight = () => { state.weight = +rWeight.value; $('vWeight').textContent = state.weight; markTicks(); };
+  wire(rScale, updScale);
+  wire(rMin, updMin);
+  wire(rLh, updLh);
+  wire(rLs, updLs);
+  wire(rWeight, updWeight);
 
   // ---- weight ticks ----
   const ticksWrap = $('ticks');
@@ -299,6 +305,8 @@ export function mountSettingsUI(root, ctx) {
   rWeight.step = state.weightFine ? 1 : 100;
   $('vWeight').textContent = state.weight === 0 ? '원본' : state.weight;
   $('axes').value = state.axes;
+  // Sync the size/rhythm value chips to the loaded settings (weight chip handled above).
+  updScale(); updMin(); updLh(); updLs();
 
   // sync check controls to state (markup defaults: ckPreserve on, ckFine off).
   const ckPreserve = $('ckPreserve');
