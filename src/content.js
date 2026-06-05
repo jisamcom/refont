@@ -93,7 +93,9 @@ async function injectWebFont() {
   const style = document.createElement('style');
   style.id = styleId;
   if (bf.urlType === 'css') {
-    style.textContent = `@import url("${bf.url}");`;
+    // Use the normalized href (percent-encodes quotes/braces) so a crafted URL
+    // can't break out of url("…") and inject arbitrary CSS.
+    style.textContent = `@import url("${parsed.href}");`;
   } else {
     try {
       const dataUrl = await browser.runtime.sendMessage({ type: MSG.FETCH_FONT, url: bf.url });
