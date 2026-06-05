@@ -113,6 +113,35 @@ describe('scope + protection', () => {
   });
 });
 
+describe('live apply to current tab', () => {
+  it('debounce-sends PREVIEW_SETTINGS to the tab on edit (popup)', () => {
+    vi.useFakeTimers();
+    const previews = [];
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 7, settings: { ...DEFAULTS, scale: 1 },
+      previewSend: (s) => previews.push(s) });
+    const rScale = root.querySelector('#rScale');
+    rScale.value = '1.6'; rScale.dispatchEvent(new Event('input'));
+    expect(previews.length).toBe(0); // debounced, not yet
+    vi.advanceTimersByTime(300);
+    expect(previews.length).toBe(1);
+    expect(previews[0].scale).toBe(1.6);
+    vi.useRealTimers();
+  });
+  it('does not live-apply in options context', () => {
+    vi.useFakeTimers();
+    const previews = [];
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'options', currentHost: null, settings: { ...DEFAULTS },
+      previewSend: (s) => previews.push(s) });
+    const rScale = root.querySelector('#rScale');
+    rScale.value = '1.6'; rScale.dispatchEvent(new Event('input'));
+    vi.advanceTimersByTime(500);
+    expect(previews.length).toBe(0);
+    vi.useRealTimers();
+  });
+});
+
 describe('recent fonts', () => {
   it('records a body pick into state.recentFonts.body (most-recent first, deduped)', () => {
     const root = document.createElement('div');

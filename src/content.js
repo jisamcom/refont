@@ -130,8 +130,10 @@ function clearMarks() {
   }
 }
 
-async function apply() {
-  settings = await browser.runtime.sendMessage({ type: MSG.GET_SETTINGS });
+// override: transient settings (live preview) that are applied but NOT persisted.
+// When omitted, the current settings are fetched from storage.
+async function apply(override) {
+  settings = override || await browser.runtime.sendMessage({ type: MSG.GET_SETTINGS });
   const active = settings.enabled && !isBlocked(location.href, settings.blocklist);
 
   if (observer) { observer.disconnect(); observer = null; }
@@ -151,6 +153,7 @@ async function apply() {
 browser.runtime.onMessage.addListener((msg) => {
   if (!msg) return undefined;
   if (msg.type === MSG.REAPPLY) { apply(); return undefined; }
+  if (msg.type === MSG.PREVIEW_SETTINGS) { apply(msg.settings); return undefined; }
   if (msg.type === MSG.GET_PAGE_FONTS) return Promise.resolve(collectPageFonts());
   return undefined;
 });
