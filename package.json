@@ -1,5 +1,5 @@
 {
-  "name": "font-changer",
+  "name": "refont",
   "version": "0.1.0",
   "description": "Replace page fonts everywhere except functional fonts (icons, math, barcode, ...).",
   "type": "module",
