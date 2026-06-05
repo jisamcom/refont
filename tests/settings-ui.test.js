@@ -93,3 +93,22 @@ describe('font pickers', () => {
     expect(api.state.family).toBe('Batang');
   });
 });
+
+describe('scope + protection', () => {
+  it('renders the current host and adds it to the blocklist textarea', () => {
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'popup', currentHost: 'news.example.com', tabId: 1, settings: { ...DEFAULTS } });
+    expect(root.querySelector('#curHost').textContent).toContain('news.example.com');
+    root.querySelector('#addHost').click();
+    expect(root.querySelector('#blocklist').value).toContain('news.example.com');
+  });
+  it('renders page fonts and adds one to the protect list on +', () => {
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1, settings: { ...DEFAULTS },
+      pageFonts: [{ name: 'Font Awesome 6 Free', protected: true }, { name: 'Pretendard', protected: false }] });
+    const rows = root.querySelectorAll('#pageFonts .chip');
+    expect(rows.length).toBe(2);
+    rows[0].querySelector('.plus').click();
+    expect(root.querySelector('#protect').value).toContain('Font Awesome 6 Free');
+  });
+});

@@ -399,6 +399,75 @@ export function mountSettingsUI(root, ctx) {
     });
   }
 
+  // ---- scope (blocklist + current site) + protection (page fonts) ----
+  const blocklistEl = $('blocklist');
+  blocklistEl.value = state.blocklist.join('\n');
+  blocklistEl.addEventListener('input', () => {
+    state.blocklist = blocklistEl.value.split('\n').map((s) => s.trim()).filter(Boolean);
+  });
+  const protectEl = $('protect');
+  protectEl.value = state.protectExtra.join('\n');
+  protectEl.addEventListener('input', () => {
+    state.protectExtra = protectEl.value.split('\n').map((s) => s.trim()).filter(Boolean);
+  });
+
+  const host = ctx.currentHost || '';
+  const curHost = $('curHost');
+  const addHost = $('addHost');
+  if (ctx.context === 'options' || !host) {
+    curHost.textContent = '현재 사이트 없음 — 팝업에서 사이트별로 설정';
+    addHost.disabled = true;
+  } else {
+    curHost.textContent = host;
+    addHost.addEventListener('click', () => {
+      const lines = blocklistEl.value.split('\n').map((s) => s.trim()).filter(Boolean);
+      if (!lines.includes(host)) { lines.push(host); }
+      blocklistEl.value = lines.join('\n');
+      state.blocklist = lines.slice();
+      const orig = addHost.textContent;
+      addHost.textContent = '✓ 추가됨';
+      setTimeout(() => { addHost.textContent = orig; }, 1200);
+    });
+  }
+
+  const pageFonts = ctx.pageFonts || [];
+  const chips = $('pageFonts');
+  chips.innerHTML = '';
+  if (!pageFonts.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = (ctx.context === 'options')
+      ? '팝업에서 페이지별로 확인'
+      : '이 페이지에서 감지된 폰트 없음';
+    chips.appendChild(empty);
+  } else {
+    for (const pf of pageFonts) {
+      const c = document.createElement('div');
+      c.className = 'chip';
+      const nm = document.createElement('span');
+      nm.className = 'nm';
+      nm.style.fontFamily = "'" + pf.name + "', sans-serif";
+      nm.textContent = pf.name;
+      const tag = document.createElement('span');
+      tag.className = 'tag ' + (pf.protected ? 'prot' : 'body');
+      tag.textContent = pf.protected ? '기능성' : '본문';
+      const plus = document.createElement('button');
+      plus.className = 'plus';
+      plus.title = '보호 목록에 추가';
+      plus.textContent = '+';
+      plus.addEventListener('click', () => {
+        const lines = protectEl.value.split('\n').map((s) => s.trim()).filter(Boolean);
+        if (!lines.includes(pf.name)) { lines.push(pf.name); }
+        protectEl.value = lines.join('\n');
+        state.protectExtra = lines.slice();
+        c.classList.add('added');
+        plus.textContent = '✓';
+      });
+      c.appendChild(nm); c.appendChild(tag); c.appendChild(plus);
+      chips.appendChild(c);
+    }
+  }
+
   // Wiring for sections/actions is added in later tasks. Expose for those tasks/tests:
   const api = { root, ctx, state, applyPreview };
   return api;
