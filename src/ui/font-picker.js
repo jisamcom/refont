@@ -9,7 +9,8 @@ export function filterFonts(fonts, q) {
 }
 
 // fonts: [{f, ko?}]; value: css family string; sample: swatch text; onChange(family)
-export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange }) {
+// recent: optional array of family strings (or a function returning one) shown in a "최근" group.
+export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange, recent }) {
   let val = value;
   let custom = !fonts.some((o) => o.f === value);
   mount.innerHTML = `<button type="button" class="fp-btn"><span class="fp-sample"></span><span class="fp-name"></span><span class="fp-cv">⌄</span></button>
@@ -25,16 +26,31 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
     bSamp.style.fontFamily = `'${val}',sans-serif`; bSamp.textContent = sample;
     bName.textContent = labFor(val); bName.classList.toggle('custom', custom);
   };
+  const optFor = (fam) => fonts.find((x) => x.f === fam) || { f: fam };
+  const labOf = (o) => (o.ko || o.f).replace(' Variable', '');
+  function addRow(o) {
+    const f = o.f; const lab = labOf(o);
+    const row = document.createElement('div');
+    row.className = 'fp-opt' + (f === val ? ' sel' : '');
+    row.innerHTML = `<span class="o-check">✓</span><span class="o-name" style="font-family:'${f}',sans-serif">${lab}</span><span class="o-spec" style="font-family:'${f}',sans-serif">${sample} 012</span>`;
+    row.onclick = () => pick(f, false);
+    list.appendChild(row);
+  }
+  function group(label) {
+    const g = document.createElement('div'); g.className = 'fp-group'; g.textContent = label; list.appendChild(g);
+  }
   function render(q = '') {
     list.innerHTML = '';
-    for (const o of filterFonts(fonts, q)) {
-      const f = o.f; const lab = (o.ko || o.f).replace(' Variable', '');
-      const row = document.createElement('div');
-      row.className = 'fp-opt' + (f === val ? ' sel' : '');
-      row.innerHTML = `<span class="o-check">✓</span><span class="o-name" style="font-family:'${f}',sans-serif">${lab}</span><span class="o-spec" style="font-family:'${f}',sans-serif">${sample} 012</span>`;
-      row.onclick = () => pick(f, false); list.appendChild(row);
-    }
     const typed = String(q || '').trim();
+    if (!typed) {
+      const rec = (typeof recent === 'function' ? recent() : recent) || [];
+      if (rec.length) {
+        group('최근');
+        for (const fam of rec) addRow(optFor(fam));
+        group('전체');
+      }
+    }
+    for (const o of filterFonts(fonts, q)) addRow(o);
     if (typed && !fonts.some((o) => o.f.toLowerCase() === typed.toLowerCase() || (o.ko && o.ko.toLowerCase() === typed.toLowerCase()))) {
       const row = document.createElement('div');
       row.className = 'fp-opt mk';

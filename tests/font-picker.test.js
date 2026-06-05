@@ -24,4 +24,22 @@ describe('makeFontPicker', () => {
     expect(onChange).toHaveBeenCalledWith('Georgia');
     expect(api.value).toBe('Georgia');
   });
+
+  it('renders a 최근 group from recent (with Korean labels) above the full list', () => {
+    const mount = document.createElement('div');
+    makeFontPicker(mount, { fonts: FONTS, value: 'Georgia', recent: ['Batang'] });
+    mount.querySelector('.fp-btn').click();
+    expect([...mount.querySelectorAll('.fp-group')].map((e) => e.textContent)).toEqual(['최근', '전체']);
+    const names = [...mount.querySelectorAll('.o-name')].map((n) => n.textContent);
+    expect(names.filter((n) => n === '바탕').length).toBe(2); // recent + full list
+  });
+
+  it('omits the 최근 group when a search query is active', () => {
+    const mount = document.createElement('div');
+    makeFontPicker(mount, { fonts: FONTS, value: 'Georgia', recent: ['Batang'] });
+    mount.querySelector('.fp-btn').click();
+    const search = mount.querySelector('.fp-search');
+    search.value = 'geo'; search.dispatchEvent(new Event('input'));
+    expect(mount.querySelectorAll('.fp-group').length).toBe(0);
+  });
 });

@@ -113,6 +113,20 @@ describe('scope + protection', () => {
   });
 });
 
+describe('recent fonts', () => {
+  it('records a body pick into state.recentFonts.body (most-recent first, deduped)', () => {
+    const root = document.createElement('div');
+    const api = mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1,
+      settings: { ...DEFAULTS, recentFonts: { body: ['Georgia'], code: [] } },
+      installedFonts: ['Georgia', 'Batang', 'Verdana'], monoFonts: ['Consolas'] });
+    root.querySelector('#bodyPicker .fp-btn').click();
+    const batang = [...root.querySelectorAll('#bodyPicker .o-name')].find((n) => n.textContent === '바탕');
+    batang.closest('.fp-opt').click();
+    expect(api.state.recentFonts.body[0]).toBe('Batang');
+    expect(api.state.recentFonts.body).toContain('Georgia');
+  });
+});
+
 describe('per-site element exclusions', () => {
   it('loads + edits manualExclusions for the current host (popup)', () => {
     const root = document.createElement('div');

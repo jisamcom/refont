@@ -339,12 +339,20 @@ export function mountSettingsUI(root, ctx) {
   // ---- font pickers (body + code) ----
   const bodyOpts = toOptions(ctx.installedFonts || []);
   const monoOpts = toOptions(ctx.monoFonts || []);
+  function pushRecent(kind, fam) {
+    const arr = state.recentFonts[kind];
+    const i = arr.indexOf(fam);
+    if (i >= 0) arr.splice(i, 1);
+    arr.unshift(fam);
+    if (arr.length > 5) arr.length = 5;
+  }
 
   const bp = makeFontPicker($('bodyPicker'), {
     fonts: bodyOpts,
     value: state.family || 'Pretendard Variable',
     sample: 'Aa가',
-    onChange: (f) => { state.family = f; applyPreview(); },
+    recent: () => state.recentFonts.body,
+    onChange: (f) => { state.family = f; pushRecent('body', f); applyPreview(); scheduleLiveApply(); },
   });
 
   function updateCodePrev(f) {
@@ -355,7 +363,8 @@ export function mountSettingsUI(root, ctx) {
     fonts: monoOpts,
     value: state.codeFamily || 'Consolas',
     sample: '{ }',
-    onChange: (f) => { state.codeFamily = f; updateCodePrev(f); },
+    recent: () => state.recentFonts.code,
+    onChange: (f) => { state.codeFamily = f; pushRecent('code', f); updateCodePrev(f); scheduleLiveApply(); },
   });
   updateCodePrev(state.codeFamily || 'Consolas');
 
