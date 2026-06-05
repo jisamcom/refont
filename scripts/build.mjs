@@ -27,6 +27,7 @@ await build({
 // static assets
 copyFileSync(join(root, 'public/options.html'), join(outdir, 'options.html'));
 copyFileSync(join(root, 'public/popup.html'), join(outdir, 'popup.html'));
+copyFileSync(join(root, 'public/settings-ui.css'), join(outdir, 'settings-ui.css'));
 cpSync(join(root, 'public/icons'), join(outdir, 'icons'), { recursive: true });
 copyFileSync(
   join(root, `public/manifest.${target}.json`),
