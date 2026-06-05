@@ -1,0 +1,22 @@
+{
+  "name": "font-changer",
+  "version": "0.1.0",
+  "description": "Replace page fonts everywhere except functional fonts (icons, math, barcode, ...).",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "node scripts/build.mjs chrome && node scripts/build.mjs firefox",
+    "build:chrome": "node scripts/build.mjs chrome",
+    "build:firefox": "node scripts/build.mjs firefox"
+  },
+  "dependencies": {
+    "webextension-polyfill": "^0.12.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.0",
+    "jsdom": "^24.0.0",
+    "vitest": "^1.6.0"
+  }
+}
