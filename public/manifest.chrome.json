@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Refont",
+  "version": "0.1.0",
+  "description": "Replace page fonts everywhere except functional fonts (icons, math, barcode, ...).",
+  "permissions": ["storage", "scripting", "activeTab", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    { "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_start", "all_frames": true }
+  ],
+  "action": { "default_popup": "popup.html", "default_title": "Refont" },
+  "options_ui": { "page": "options.html", "open_in_tab": true },
+  "commands": {
+    "toggle-site": {
+      "suggested_key": { "default": "Alt+Shift+F" },
+      "description": "Toggle font replacement on the current site"
+    }
+  },
+  "icons": { "16": "icons/icon-16.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" }
+}
