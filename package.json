@@ -9,7 +9,9 @@
     "test:watch": "vitest",
     "build": "node scripts/build.mjs chrome && node scripts/build.mjs firefox",
     "build:chrome": "node scripts/build.mjs chrome",
-    "build:firefox": "node scripts/build.mjs firefox"
+    "build:firefox": "node scripts/build.mjs firefox",
+    "package": "npm run build && node scripts/package.mjs",
+    "screenshots": "node scripts/gen-screenshots.mjs"
   },
   "dependencies": {
     "webextension-polyfill": "^0.12.0"
