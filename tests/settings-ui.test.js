@@ -45,3 +45,16 @@ describe('mountSettingsUI', () => {
     expect(document.body.classList.contains('ctx-popup')).toBe(true);
   });
 });
+
+describe('live preview wiring', () => {
+  it('updates the specimen font-size and weight when sliders change', () => {
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1, settings: { ...DEFAULTS, scale: 1, weight: 0 } });
+    const rWeight = root.querySelector('#rWeight');
+    rWeight.value = '800'; rWeight.dispatchEvent(new Event('input'));
+    expect(root.querySelector('#sKr').style.fontWeight).toBe('800');
+    const rScale = root.querySelector('#rScale');
+    rScale.value = '2'; rScale.dispatchEvent(new Event('input'));
+    expect(parseFloat(root.querySelector('#sEn').style.fontSize)).toBeGreaterThan(20);
+  });
+});

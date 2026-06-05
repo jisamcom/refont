@@ -2,6 +2,8 @@
 import browser from 'webextension-polyfill';
 import { MSG } from '../lib/messaging.js';
 import { DEFAULTS } from '../lib/storage.js';
+import { parseAxes } from '../lib/engine.js';
+import { labelOf } from './font-names.js';
 
 // ---- pure mapping (unit-tested) ----
 export function settingsToState(s) {
@@ -180,7 +182,137 @@ export function mountSettingsUI(root, ctx) {
   const state = settingsToState(settings);
   document.body.classList.add(ctx.context === 'options' ? 'ctx-options' : 'ctx-popup');
   root.innerHTML = MARKUP;
-  // Wiring is added in later tasks. Expose for those tasks/tests:
-  const api = { root, ctx, state };
+
+  // ---- live specimen preview + sliders + weight + axes (scoped to root) ----
+  const $ = (id) => root.querySelector('#' + id);
+  const baseKr = 23, baseEn = 16, baseNum = 12;
+
+  function applyPreview() {
+    const fam = "'" + state.family + "', system-ui, sans-serif";
+    const w = String(state.weight || 400);
+    const ls = state.letterSpacing ? state.letterSpacing + 'px' : '';
+    const lh = state.lineHeight > 0 ? state.lineHeight : '';
+    const fvs = ["'wght' " + w];
+    parseAxes(state.axes).forEach((a) => fvs.push("'" + a.tag + "' " + a.val));
+    const fvsStr = fvs.join(', ');
+    const kr = $('sKr'), en = $('sEn'), num = $('sNum');
+    for (const el of [kr, en, num]) {
+      el.style.fontFamily = fam;
+      el.style.fontWeight = w;
+      el.style.letterSpacing = ls;
+      el.style.lineHeight = lh;
+      el.style.fontVariationSettings = fvsStr;
+    }
+    kr.style.fontSize = previewSize(baseKr, state.scale, state.minSize, baseEn) + 'px';
+    en.style.fontSize = previewSize(baseEn, state.scale, state.minSize, baseEn) + 'px';
+    num.style.fontSize = previewSize(baseNum, state.scale, state.minSize, baseEn) + 'px';
+    drawReadout();
+  }
+
+  function drawReadout() {
+    const r = $('readout');
+    const S = '<span class="sep">·</span>';
+    const parts = [
+      '<b>' + labelOf(state.family) + '</b>',
+      '<b>' + state.scale.toFixed(2) + '×</b>',
+      '<b>' + state.weight + '</b>',
+    ];
+    if (state.minSize > 0) parts.push('min ' + state.minSize + 'px');
+    if (state.lineHeight > 0) parts.push('lh ' + state.lineHeight.toFixed(2));
+    if (state.letterSpacing != 0) parts.push('ls ' + state.letterSpacing.toFixed(1));
+    parseAxes(state.axes).forEach((a) => parts.push(a.tag + ' ' + a.val));
+    r.innerHTML = parts.join(' ' + S + ' ');
+  }
+
+  // ---- sliders ----
+  function setP(el) {
+    const min = +el.min, max = +el.max, v = +el.value;
+    el.style.setProperty('--p', ((v - min) / (max - min) * 100) + '%');
+  }
+  function wire(el, fn) {
+    setP(el);
+    el.addEventListener('input', () => { setP(el); fn(); applyPreview(); });
+  }
+
+  const rScale = $('rScale'), rMin = $('rMin'), rLh = $('rLh'), rLs = $('rLs'), rWeight = $('rWeight');
+
+  wire(rScale, () => { state.scale = +rScale.value; $('vScale').textContent = state.scale.toFixed(2) + '×'; });
+  wire(rMin, () => {
+    state.minSize = +rMin.value;
+    const v = $('vMin');
+    if (state.minSize === 0) { v.textContent = '끔'; v.classList.add('off'); }
+    else { v.textContent = state.minSize + 'px'; v.classList.remove('off'); }
+  });
+  wire(rLh, () => {
+    state.lineHeight = +rLh.value;
+    const v = $('vLh');
+    if (state.lineHeight === 0) { v.textContent = '끔'; v.classList.add('off'); }
+    else { v.textContent = state.lineHeight.toFixed(2); v.classList.remove('off'); }
+  });
+  wire(rLs, () => { state.letterSpacing = +rLs.value; $('vLs').textContent = state.letterSpacing.toFixed(1) + 'px'; });
+  wire(rWeight, () => { state.weight = +rWeight.value; $('vWeight').textContent = state.weight; markTicks(); });
+
+  // ---- weight ticks ----
+  const ticksWrap = $('ticks');
+  for (let w = 100; w <= 900; w += 200) {
+    const s = document.createElement('span');
+    s.textContent = w;
+    s.dataset.w = w;
+    ticksWrap.appendChild(s);
+  }
+  function markTicks() {
+    [...ticksWrap.children].forEach((s) => s.classList.toggle('hot', Math.abs(+s.dataset.w - state.weight) <= 50));
+  }
+
+  // ---- inline checks ----
+  function toggleCheck(el, onChange) {
+    el.addEventListener('click', () => {
+      const on = el.getAttribute('aria-checked') !== 'true';
+      el.setAttribute('aria-checked', on);
+      el.classList.toggle('on', on);
+      onChange(on);
+    });
+  }
+  toggleCheck($('ckPreserve'), (on) => { state.preserveBold = on; });
+  toggleCheck($('ckFine'), (on) => {
+    state.weightFine = on;
+    rWeight.step = on ? 1 : 100;
+    if (!on) {
+      rWeight.value = Math.round(rWeight.value / 100) * 100;
+      state.weight = +rWeight.value;
+      $('vWeight').textContent = state.weight;
+      setP(rWeight);
+    }
+    markTicks();
+    applyPreview();
+  });
+
+  $('axes').addEventListener('input', (e) => { state.axes = e.target.value; applyPreview(); });
+
+  // ---- initialize controls from state (before first applyPreview) ----
+  rScale.value = state.scale;
+  rMin.value = state.minSize;
+  rLh.value = state.lineHeight;
+  rLs.value = state.letterSpacing;
+  // weight:0 (원본/keep) → position slider at 400 but keep state.weight at 0 for saving.
+  rWeight.value = state.weight || 400;
+  rWeight.step = state.weightFine ? 1 : 100;
+  $('vWeight').textContent = state.weight === 0 ? '원본' : state.weight;
+  $('axes').value = state.axes;
+
+  // sync check controls to state (markup defaults: ckPreserve on, ckFine off).
+  const ckPreserve = $('ckPreserve');
+  ckPreserve.setAttribute('aria-checked', String(!!state.preserveBold));
+  ckPreserve.classList.toggle('on', !!state.preserveBold);
+  const ckFine = $('ckFine');
+  ckFine.setAttribute('aria-checked', String(!!state.weightFine));
+  ckFine.classList.toggle('on', !!state.weightFine);
+
+  [rScale, rMin, rLh, rLs, rWeight].forEach(setP);
+  markTicks();
+  applyPreview();
+
+  // Wiring for pickers/sections/actions is added in later tasks. Expose for those tasks/tests:
+  const api = { root, ctx, state, applyPreview };
   return api;
 }
