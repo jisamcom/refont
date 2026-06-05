@@ -16,6 +16,12 @@ export const FONT_CANDIDATES = [
   'D2Coding', 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', 'Menlo', 'Monaco',
 ];
 
+export const MONO_CANDIDATES = [
+  'D2Coding', 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Cascadia Mono',
+  'Source Code Pro', 'IBM Plex Mono', 'Consolas', 'Courier New', 'Lucida Console',
+  'SF Mono', 'Menlo', 'Monaco',
+];
+
 const BASELINES = ['monospace', 'serif', 'sans-serif'];
 const TEST_STRING = 'mmmmmmmmmwwwwwww가나다라ABCabc0123';
 
