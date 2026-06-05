@@ -211,7 +211,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb{background:var(--accent)}
 .btn.saved{background:var(--ok);border-color:var(--ok);color:#10210a}
 
 .popup.off .specimen .spec-kr,.popup.off .specimen .spec-en,.popup.off .specimen .spec-num{filter:grayscale(1) opacity(.45)}
-.popup.off .body{opacity:.5;pointer-events:none}
+.popup.off .body{opacity:.55}  /* dim cue only — controls stay operable (spec §12) */
 .popup.off .actions .btn:not(.primary){opacity:.5;pointer-events:none}
 .btn:disabled,.btn-add:disabled{opacity:.45;cursor:not-allowed}
 .toggle:focus-visible,.check:focus-visible,.seg button:focus-visible,.fp-btn:focus-visible,.btn:focus-visible,.btn-add:focus-visible,.chip .plus:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-glow);border-radius:8px}
