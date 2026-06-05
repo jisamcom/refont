@@ -52,3 +52,17 @@ describe('getSettings/saveSettings', () => {
     expect(s.enabled).toBe(true);
   });
 });
+
+describe('redesign fields', () => {
+  it('defaults axes and weightFine, schema is 2', () => {
+    expect(DEFAULTS.axes).toBe('');
+    expect(DEFAULTS.weightFine).toBe(false);
+    expect(SCHEMA_VERSION).toBe(2);
+  });
+  it('migrate fills axes/weightFine for a v1 object and bumps version', () => {
+    const m = migrate({ schemaVersion: 1, scale: 1.2 });
+    expect(m.axes).toBe('');
+    expect(m.weightFine).toBe(false);
+    expect(m.schemaVersion).toBe(2);
+  });
+});
