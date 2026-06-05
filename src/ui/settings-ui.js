@@ -22,6 +22,11 @@ export function settingsToState(s) {
     codeFamily: (s.codeFont && s.codeFont.name) || '',
     blocklist: (s.blocklist || []).slice(),
     protectExtra: (s.protectionDenylistExtra || []).slice(),
+    manualExclusions: { ...(s.manualExclusions || {}) },
+    recentFonts: {
+      body: ((s.recentFonts && s.recentFonts.body) || []).slice(),
+      code: ((s.recentFonts && s.recentFonts.code) || []).slice(),
+    },
   };
 }
 
@@ -33,6 +38,7 @@ export function stateToSettings(st) {
     scale: st.scale, minSize: st.minSize, weight: st.weight, weightFine: st.weightFine,
     preserveBold: st.preserveBold, lineHeight: st.lineHeight, letterSpacing: st.letterSpacing, axes: st.axes,
     blocklist: st.blocklist, protectionDenylistExtra: st.protectExtra,
+    manualExclusions: st.manualExclusions, recentFonts: st.recentFonts,
   };
 }
 

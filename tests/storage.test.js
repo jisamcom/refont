@@ -54,15 +54,17 @@ describe('getSettings/saveSettings', () => {
 });
 
 describe('redesign fields', () => {
-  it('defaults axes and weightFine, schema is 2', () => {
+  it('defaults axes, weightFine, recentFonts; schema is 3', () => {
     expect(DEFAULTS.axes).toBe('');
     expect(DEFAULTS.weightFine).toBe(false);
-    expect(SCHEMA_VERSION).toBe(2);
+    expect(DEFAULTS.recentFonts).toEqual({ body: [], code: [] });
+    expect(SCHEMA_VERSION).toBe(3);
   });
-  it('migrate fills axes/weightFine for a v1 object and bumps version', () => {
+  it('migrate fills new fields for an older object and bumps version', () => {
     const m = migrate({ schemaVersion: 1, scale: 1.2 });
     expect(m.axes).toBe('');
     expect(m.weightFine).toBe(false);
-    expect(m.schemaVersion).toBe(2);
+    expect(m.recentFonts).toEqual({ body: [], code: [] });
+    expect(m.schemaVersion).toBe(3);
   });
 });
