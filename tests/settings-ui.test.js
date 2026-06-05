@@ -112,3 +112,18 @@ describe('scope + protection', () => {
     expect(root.querySelector('#protect').value).toContain('Font Awesome 6 Free');
   });
 });
+
+describe('actions', () => {
+  it('saves the current state via SAVE_SETTINGS', async () => {
+    const sent = [];
+    const root = document.createElement('div');
+    const api = mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1, settings: { ...DEFAULTS },
+      send: (m) => { sent.push(m); return Promise.resolve({}); } });
+    api.state.scale = 1.4;
+    root.querySelector('#save').click();
+    await Promise.resolve();
+    const saveMsg = sent.find((m) => m.type === 'SAVE_SETTINGS');
+    expect(saveMsg).toBeTruthy();
+    expect(saveMsg.payload.scale).toBe(1.4);
+  });
+});

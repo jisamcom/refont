@@ -2,6 +2,7 @@
 import browser from 'webextension-polyfill';
 import { MSG } from '../lib/messaging.js';
 import { DEFAULTS } from '../lib/storage.js';
+import { serializeSettings, parseSettings } from '../lib/settings-io.js';
 import { parseAxes } from '../lib/engine.js';
 import { labelOf, toOptions } from './font-names.js';
 import { makeFontPicker } from './font-picker.js';
@@ -466,6 +467,95 @@ export function mountSettingsUI(root, ctx) {
       c.appendChild(nm); c.appendChild(tag); c.appendChild(plus);
       chips.appendChild(c);
     }
+  }
+
+  // ---- actions ----
+  const send = ctx.send || ((m) => browser.runtime.sendMessage(m));
+
+  // Save
+  const saveBtn = $('save');
+  saveBtn.addEventListener('click', () => {
+    send({ type: MSG.SAVE_SETTINGS, payload: stateToSettings(state) });
+    const orig = saveBtn.textContent;
+    saveBtn.textContent = '✓ 저장됨';
+    saveBtn.classList.add('saved');
+    setTimeout(() => { saveBtn.textContent = orig; saveBtn.classList.remove('saved'); }, 1200);
+  });
+
+  // Export
+  $('export').addEventListener('click', () => {
+    const json = serializeSettings({ ...DEFAULTS, ...stateToSettings(state) });
+    const blob = new Blob([json], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'refont-settings.json';
+    a.click();
+  });
+
+  // Import (hidden file input created dynamically)
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'application/json';
+  fileInput.style.display = 'none';
+  root.appendChild(fileInput);
+  $('import').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    try {
+      const payload = parseSettings(await file.text());
+      await send({ type: MSG.SAVE_SETTINGS, payload });
+      location.reload();
+    } catch {
+      const orig = saveBtn.textContent;
+      saveBtn.textContent = '잘못된 파일';
+      setTimeout(() => { saveBtn.textContent = orig; }, 1500);
+    }
+  });
+
+  // Full-screen (popup only)
+  const fullBtn = $('full');
+  if (ctx.context === 'popup') {
+    fullBtn.addEventListener('click', () => { browser.runtime.openOptionsPage(); window.close(); });
+  } else {
+    fullBtn.hidden = true;
+  }
+
+  // ---- power toggle ----
+  const toggle = $('toggle');
+  const toggleLbl = $('toggleLbl');
+  const popupEl = $('popup');
+  function setToggle(on) {
+    toggle.setAttribute('aria-checked', String(on));
+    toggle.classList.toggle('on', on);
+    popupEl.classList.toggle('off', !on);
+  }
+  if (ctx.context === 'popup') {
+    const host = ctx.currentHost || '';
+    let on = !ctx.blocked;
+    setToggle(on);
+    toggleLbl.textContent = on ? '이 사이트 켜짐' : '이 사이트 꺼짐';
+    toggle.addEventListener('click', () => {
+      on = !on;
+      setToggle(on);
+      toggleLbl.textContent = on ? '이 사이트 켜짐' : '이 사이트 꺼짐';
+      // keep state.blocklist in sync (off => host present)
+      const set = new Set(state.blocklist);
+      if (on) set.delete(host); else if (host) set.add(host);
+      state.blocklist = [...set];
+      const blEl = $('blocklist'); if (blEl) blEl.value = state.blocklist.join('\n');
+      send({ type: MSG.TOGGLE_SITE, url: ctx.currentUrl || host });
+    });
+  } else {
+    let on = state.enabled !== false;
+    setToggle(on);
+    toggleLbl.textContent = on ? '전체 켜짐' : '전체 꺼짐';
+    toggle.addEventListener('click', () => {
+      on = !on;
+      state.enabled = on;
+      setToggle(on);
+      toggleLbl.textContent = on ? '전체 켜짐' : '전체 꺼짐';
+    });
   }
 
   // Wiring for sections/actions is added in later tasks. Expose for those tasks/tests:
