@@ -1,6 +1,6 @@
 // tests/font-detect.test.js
 import { describe, it, expect } from 'vitest';
-import { detectFonts, FONT_CANDIDATES } from '../src/lib/font-detect.js';
+import { detectFonts, FONT_CANDIDATES, MONO_CANDIDATES } from '../src/lib/font-detect.js';
 
 // Fake measurer: a font is "installed" if its name is in `installed`.
 // Baselines (monospace/serif/sans-serif) return a fixed width; an installed
@@ -32,5 +32,13 @@ describe('FONT_CANDIDATES', () => {
     expect(FONT_CANDIDATES).toContain('Malgun Gothic');
     expect(FONT_CANDIDATES).toContain('Arial');
     expect(FONT_CANDIDATES.length).toBeGreaterThan(20);
+  });
+});
+
+describe('MONO_CANDIDATES', () => {
+  it('is a non-empty list of monospace family names', () => {
+    expect(Array.isArray(MONO_CANDIDATES)).toBe(true);
+    expect(MONO_CANDIDATES).toContain('Consolas');
+    expect(MONO_CANDIDATES).toContain('D2Coding');
   });
 });
