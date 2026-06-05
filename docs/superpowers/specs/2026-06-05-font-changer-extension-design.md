@@ -1,23 +1,24 @@
 # 폰트 교체 익스텐션 — 설계 문서
 
 - **작성일:** 2026-06-05
-- **상태:** 승인됨 (구현 계획 작성 대기)
+- **상태:** 승인됨 + 연구 반영 (구현 계획 작성 대기)
 - **대상:** Chrome(+Chromium 계열) / Firefox 동시 지원
+- **관련 문서:** [기능성 폰트 보호 리서치](2026-06-05-functional-fonts-protection-research.md) — denylist·감지 알고리즘의 근거
 
 ---
 
 ## 1. 개요 & 목표
 
-모든 웹페이지의 본문 폰트를 사용자가 고른 폰트로 교체하되, **아이콘 폰트는 절대 건드리지 않는** 크로스브라우저 확장 프로그램.
+모든 웹페이지의 본문 폰트를 사용자가 고른 폰트로 교체하되, **"폰트가 곧 기능"인 폰트(아이콘·수학·악보·바코드·딩벳·난독화 등)는 절대 건드리지 않는** 크로스브라우저 확장 프로그램.
 
 **우선순위가 매겨진 목표**
-1. **아이콘 절대 안 깨짐** (최우선) — Font Awesome, Material Icons 등 아이콘 폰트는 그대로 둔다.
+1. **기능성 폰트 절대 안 깨짐** (최우선) — 아이콘(Font Awesome/Material Icons), 수학(KaTeX/MathJax), 악보(SMuFL/Bravura), 바코드(Libre Barcode), 딩벳(Wingdings), 안티스크래핑/난독화 폰트, 이모지 등은 교체하지 않거나 보존한다.
 2. **빠르고 동적 페이지(SPA)에서도 안정적**으로 동작.
 3. 사용자가 폰트·크기·두께·간격을 세밀하게 제어.
 4. 크롬/파폭 동작 동일성.
 
 **해결하려는 문제**
-기존 폰트 익스텐션들은 `* { font-family: X !important }`를 무차별 적용해 아이콘 폰트의 글리프 매핑(PUA 코드포인트 / 리거처 / `::before content`)을 깨뜨린다. 결과적으로 아이콘이 두부(네모)나 엉뚱한 글자로 표시된다. 이 익스텐션은 **요소별로 아이콘 폰트 여부를 판별해 선택적으로 건너뛴다.**
+기존 폰트 익스텐션들은 `* { font-family: X !important }`를 무차별 적용해 기능성 폰트의 글리프 매핑(PUA 코드포인트 / 리거처 / `::before content` / cmap remap)을 깨뜨린다. 결과적으로 아이콘이 두부(네모)나 엉뚱한 글자로, 수식·악보가 깨지고, 난독화된 숫자가 잘못 노출된다. 이 익스텐션은 **요소별로 기능성 폰트 여부를 판별해 선택적으로 건너뛴다.**
 
 ---
 
@@ -32,8 +33,8 @@ src/
   popup.html / .js     # 현재 사이트 빠른 on/off + 빠른 폰트 전환
   lib/
     font-detect.js     # canvas 폭 측정으로 설치 폰트 감지
-    icon-detect.js     # 아이콘 폰트 판별 (denylist + 휴리스틱 + PUA)
-    engine.js          # CSS 빌드 / 주입 / skip 표시
+    font-protection.js # 기능성 폰트 판별 (family denylist + PUA + 클래스 힌트)
+    engine.js          # CSS 빌드 / per-element 인라인(크기·두께) 계산
     storage.js         # 설정 스키마, 기본값, get/set
     messaging.js       # 타입드 메시지 패싱
 ```
@@ -44,7 +45,7 @@ src/
 - 빌드 단계(esbuild 등)로 `dist/chrome`, `dist/firefox`에 각 매니페스트로 번들 출력.
 
 **컴포넌트 책임**
-- **content script**: 현재 호스트가 블록리스트인지 확인 → 비활성이면 아무것도 안 함. 활성이면 ① 베이스 CSS를 **user-origin**으로 주입 ② JS 아이콘 감지 패스 실행 ③ MutationObserver로 동적 노드 대응.
+- **content script**: 현재 호스트가 블록리스트인지 확인 → 비활성이면 아무것도 안 함. 활성이면 ① 베이스 CSS를 **user-origin**으로 주입(background 경유 `scripting.insertCSS({origin:'USER'})`) ② JS 보호 감지 패스 실행 — 직접 텍스트가 있는 비보호 요소에만 `data-fc`(코드는 `data-fc-code`) 마킹 + per-element 크기·두께 인라인 적용 ③ MutationObserver로 동적 노드 대응.
 - **background**: `storage`에서 설정 제공, 웹폰트 파일을 fetch해 base64 data URL로 변환(CSP 우회), 툴바 클릭/단축키/컨텍스트 메뉴 처리, 탭 뱃지 갱신.
 - **options/popup**: 설정 편집 및 즉시 적용 메시지 전송.
 
@@ -66,21 +67,25 @@ src/
 
 ---
 
-## 4. 아이콘 안전 (핵심 메커니즘)
+## 4. 기능성 폰트 보호 (핵심 메커니즘)
 
-요소가 아래 조건 중 **하나라도** 해당하면 폰트 교체에서 제외한다. 제외 요소엔 `data-fontchanger-skip` 속성을 달고, 주입 CSS가 해당 요소를 `font-family: revert !important`로 되돌린다.
+> 근거·전체 식별자 목록: [기능성 폰트 보호 리서치](2026-06-05-functional-fonts-protection-research.md). 여기서는 설계 요지만.
 
-**자동 감지 계층**
-1. **아이콘 폰트 패밀리 denylist** — 요소의 computed `font-family`가 다음 중 하나에 매칭:
-   - Font Awesome (4/5/6, Free/Brands/Pro), Material Icons, Material Symbols (Outlined/Rounded/Sharp), Ionicons, Glyphicons Halflings, Bootstrap Icons, Remix Icon, Tabler Icons, Lucide, Feather, Octicons, Phosphor, Foundation Icons, Typicons, Weather Icons, Dashicons(WordPress), Segoe MDL2/Fluent Assets, VS Code codicon 등.
-2. **아이콘 클래스 패턴 힌트** — 정규식: `(^|[\s_-])(icon|fa|fas|far|fab|fal|fad|material-icons|material-symbols|glyphicon|mi|ms|ti|bi|ri|lucide|ph|octicon|codicon)([\s_-]|$)` (단독 근거가 아닌 보조 신호).
-3. **PUA 내용 감지** — 요소(및 `::before`/`::after`)의 텍스트가 전부 Private Use Area 코드포인트(U+E000–U+F8FF, U+F0000+, U+100000+).
-4. **생성 콘텐츠 보호** — `::before`/`::after`의 font-family는 **아예 손대지 않는다.**
+**마킹 방식 (opt-in):** JS 패스가 "직접 텍스트가 있고 + 보호 대상이 아닌" 요소에만 `data-fc`(코드/고정폭은 `data-fc-code`)를 부여하고, user-origin CSS `[data-fc]{font-family:… !important}`가 그 요소에만 적용된다. **보호 대상 요소엔 아무 속성도 달지 않아** 사이트 원래 폰트가 그대로 유지된다. (revert 규칙·특이성 경쟁 불필요. 아이콘이 자체 `font-family` 규칙을 갖는 경우는 물론, 컨테이너에 `data-fc`를 안 달아 상속 오염도 없음.)
+
+**감지 알고리즘 (요소/텍스트노드별, 첫 보호 판정에서 중단):**
+1. **Computed font-family 이름 매칭 (1순위·HIGH).** 요소 **및 `::before`/`::after`**의 computed `font-family`를 소문자화해 `FONT_FAMILY_DENYLIST` substring + risky exact-token(`symbol` 등) 검사. 매칭 → 보호. (카테고리: 아이콘 FA/Material/codicon…, 수학 `katex_`/`mjxtex`/`mathjax_`, 악보 bravura/petaluma/leland, 바코드 `libre barcode`, 딩벳 wingdings/webdings/marlett, 디스플레이 `dseg`, blank `adobe blank` 등)
+2. **PUA/기능 콘텐츠 검사 (이름 모르는·난독화 폰트 포착·HIGH).** 노드 텍스트에 PUA(U+E000–F8FF, U+F0000–FFFFD, U+100000–10FFFD) / 레거시 심볼(U+F020–F0FF) / 음악(U+1D100–1D1FF) 코드포인트가 상당 비율 → 보호. **Maoyan류 랜덤 family명 난독화 폰트에 대한 유일 방어.**
+3. **클래스 힌트 + 짧은/PUA 텍스트 (약한 3차·단독 금지).** `ICON_CLASS_HINT_RE`(fa/material-icons/codicon/glyphicon…) 매칭 **AND** 텍스트 ≤~3자 또는 리거처 단어/PUA → 보호.
+4. **생성 콘텐츠 보호** — `::before`/`::after`의 font-family는 아예 손대지 않는다.
+
+> **검증된 핵심 주의 (REFUTED, 4표):** Font Awesome 클래스 prefix(`fa/fas/far…`)는 신뢰 가능한 단독 감지 신호가 **아니다**(FA6/7 long-form 전환, `fa-` CSS 충돌, SVG+JS 모드는 폰트 없음). → **family 이름 + PUA 콘텐츠**가 1순위, 클래스는 약한 보조.
+
+**이모지 (skip 아님, fallback로 보존):** 이모지는 실 Unicode라 폰트 fallback으로 생존. 요소를 보호하지 말고, 교체 폰트 스택 **끝에 이모지 폰트를 append**한다 → `"<UserFont>", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`. 단일 폰트 `!important`로 fallback을 죽이지 않는다.
 
 **수동 제외 (자동이 놓친 경우)**
-- 사용자가 **폰트 패밀리명 / CSS 선택자 / 사이트** 단위로 제외 항목을 추가할 수 있다.
-- denylist에 없는 커스텀 아이콘 폰트가 깨지면 사용자가 직접 등록 → 같은 `data-fontchanger-skip` 메커니즘으로 처리.
-- (향후) 사용자가 추가한 denylist 항목을 기본 denylist 업데이트로 제안받는 흐름 고려.
+- 사용자가 **폰트 패밀리명 / CSS 선택자 / 사이트** 단위로 제외를 추가 → 1단계 denylist에 합쳐 처리(`protectionDenylistExtra` / `manualExclusions`).
+- 자동 denylist에 없는 커스텀 기능성 폰트가 깨지면 사용자가 직접 등록.
 
 ---
 
@@ -88,7 +93,7 @@ src/
 
 | 대상 | 처리 |
 |------|------|
-| 본문 텍스트 | 선택한 본문 폰트로 교체. 폰트 스택 맨 앞에 삽입 + user-origin `!important`. |
+| 본문 텍스트 | 선택한 본문 폰트로 교체. 스택 = `"<UserFont>", <이모지 폰트들>, sans-serif` + user-origin `!important`(`[data-fc]`). |
 | 코드/고정폭 | **별도 monospace 폰트 설정.** `code`, `pre`, `kbd`, `samp`, computed monospace 요소 대상. |
 | 크기(scale) | 기존 크기 × **배율**(예 ×1.1)로 상대 위계 유지. + 선택적 **최소 크기 하한**(예 14px 미만은 14px로). |
 | 두께(weight) | 기본 weight 지정 시, computed `font-weight`가 normal(≈400)인 요소에만 적용하고 더 굵은(bold 등) 요소는 그대로 둬서 **볼드 위계 보존**. 이 조건 판단은 JS 감지 패스가 수행하고 해당 요소에만 weight를 부여. (`weight: 0`이면 두께 미변경) |
@@ -132,7 +137,7 @@ src/
   letterSpacing: 0,              // 0 = off
   blocklist: ["docs.google.com/spreadsheets"],
   manualExclusions: { "<host>": ["<selector | fontFamily>"] },
-  iconDenylistExtra: []           // 사용자 추가 아이콘 폰트
+  protectionDenylistExtra: []     // 사용자 추가 보호 폰트(family substring)
 }
 ```
 
@@ -142,14 +147,11 @@ src/
 
 ## 9. 폰트 교체 엔진 (하이브리드)
 
-1. **CSS 주입 (user-origin)** — `chrome.scripting.insertCSS({origin:'USER'})` / 파폭 `browser.tabs.insertCSS({cssOrigin:'user'})`.
-   - user-origin `!important`는 사이트의 author `!important`를 캐스케이드에서 **이긴다** → 익스텐션이 닿을 수 있는 최고 우선순위.
-   - 본문/코드 폰트 스택, 크기 배율, 두께, 줄간격·자간, 그리고 `[data-fontchanger-skip]` revert 규칙을 한 번에 정의.
-   - CSS이므로 동적으로 새로 생긴 요소도 자동 적용(SPA 강함).
-2. **JS 감지 패스** — 초기 1회 + MutationObserver. computed style / 내용을 검사해 아이콘 요소에 `data-fontchanger-skip` 부여(섹션 4). 수동 제외도 여기서 적용.
-3. **두 레이어 조합** — CSS의 속도·동적성 + JS의 per-element 아이콘 정밀 감지.
+1. **font-family는 user-origin CSS로** — background가 `scripting.insertCSS({origin:'USER'})`(파폭도 동일 API, `origin:'USER'`)로 주입. 규칙은 `[data-fc]{font-family:<bodyStack> !important}` / `[data-fc-code]{font-family:<codeStack> !important}` (+ 설정 시 `line-height`/`letter-spacing`). user-origin `!important`는 사이트 author `!important`를 **이겨** 최고 우선순위. (content script는 `scripting`을 못 부르므로 빌드한 CSS를 background에 메시지로 보내 주입.)
+2. **크기·두께는 per-element 인라인으로** — scale·최소크기·조건부 weight는 각 요소의 기존 값에 상대적이라 CSS로 일괄 불가. JS 패스가 요소별 computed 값을 읽어 `engine.computeElementInline()` 결과를 인라인 `!important`로 설정. (font-family와 충돌하지 않는 별개 프로퍼티)
+3. **JS 보호/마킹 패스** — 초기 1회 + MutationObserver. 직접 텍스트 보유 + 비보호 요소에만 `data-fc`/`data-fc-code` 부여(섹션 4 알고리즘). 보호 요소엔 무표시 → 원래 폰트 유지.
 
-> **렌더러 레벨 치환을 쓰지 않는 이유:** `chrome.fontSettings`는 (a) 페이지가 폰트를 명시하지 않은 경우만 적용돼 현대 사이트 대부분에서 무력하고 (b) 크롬 전용이라 크로스브라우저가 깨지며 (c) 일괄 치환이라 아이콘을 더 깨뜨린다. 아이콘 선택적 제외는 per-element 검사가 필요하고 이는 DOM/CSSOM 레이어에만 존재한다. 따라서 CSS/JS가 이 요구사항엔 올바른 레이어다.
+> **렌더러 레벨 치환을 쓰지 않는 이유:** `chrome.fontSettings`는 (a) 페이지가 폰트를 명시하지 않은 경우만 적용돼 현대 사이트 대부분에서 무력하고 (b) 크롬 전용이라 크로스브라우저가 깨지며 (c) 일괄 치환이라 기능성 폰트를 더 깨뜨린다. 선택적 제외는 per-element 검사가 필요하고 이는 DOM/CSSOM 레이어에만 존재한다. 따라서 CSS/JS가 이 요구사항엔 올바른 레이어다.
 
 ---
 
@@ -166,16 +168,20 @@ src/
 ## 11. 테스트 전략
 
 **유닛 테스트 (순수 모듈, vitest 등)**
-- `icon-detect`: PUA 코드포인트 판별, denylist 매칭, 클래스 패턴.
-- `font-detect`: canvas 측정 로직(설치/미설치 구분).
-- `storage`: 스키마 기본값, 마이그레이션.
-- `engine`: CSS 빌더 출력 검증.
+- `font-protection`: PUA 코드포인트 판별, family denylist substring/exact-token 매칭, 클래스 힌트 정규식, 종합 `shouldProtect` 판정.
+- `font-detect`: canvas 측정 로직(설치/미설치 구분, measure 주입).
+- `storage`: 스키마 기본값, 마이그레이션, 블록리스트 매칭(`isBlocked`).
+- `engine`: `buildCss` 출력 검증, `computeElementInline`(scale/min/조건부 weight).
+- `background`: `fetchFontAsDataUrl`(fetch 모킹), `guessFontMime`, base64 변환.
 
 **수동/통합 테스트 매트릭스**
-- Font Awesome 사이트 (의사요소 아이콘)
-- Material Icons 사이트 (리거처 아이콘)
-- Glyphicons 사이트
-- PUA 기반 아이콘 사이트 (예: Claude 사이드바)
+- 아이콘: Font Awesome(의사요소), Material Icons/Symbols(리거처), codicon/Glyphicons, PUA 아이콘(예: Claude 사이드바)
+- 수학: KaTeX 페이지, MathJax(`mjx-container`) 페이지
+- 악보: SMuFL(Bravura) 렌더 페이지
+- 바코드: Libre Barcode 페이지
+- 딩벳/심볼: Wingdings/Webdings 사용 페이지
+- 안티스크래핑: PUA 숫자 난독화 사이트(숫자 안 깨지는지)
+- 이모지: 이모지 다수 페이지(교체 후에도 컬러 이모지 유지)
 - Google Sheets (블록리스트 동작)
 - CSP 엄격 사이트 (웹폰트 data URL 우회)
 - SPA (동적 콘텐츠 MutationObserver 대응)
