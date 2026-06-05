@@ -199,8 +199,9 @@ export function mountSettingsUI(root, ctx) {
   // ---- live specimen preview + sliders + weight + axes (scoped to root) ----
   const $ = (id) => root.querySelector('#' + id);
   const baseKr = 23, baseEn = 16, baseNum = 12;
-  // Reassigned to the real debounced page-applier in the actions block below;
+  // Reassigned to the real debounced page-applier near the end of mount;
   // change handlers call it so edits also reflect on the current tab.
+  let ready = false;
   let scheduleLiveApply = () => {};
 
   function applyPreview() {
@@ -223,6 +224,7 @@ export function mountSettingsUI(root, ctx) {
     en.style.fontSize = previewSize(baseEn, state.scale, state.minSize, baseEn) + 'px';
     num.style.fontSize = previewSize(baseNum, state.scale, state.minSize, baseEn) + 'px';
     drawReadout();
+    scheduleLiveApply();
   }
 
   function drawReadout() {
@@ -295,7 +297,7 @@ export function mountSettingsUI(root, ctx) {
       onChange(on);
     });
   }
-  toggleCheck($('ckPreserve'), (on) => { state.preserveBold = on; });
+  toggleCheck($('ckPreserve'), (on) => { state.preserveBold = on; scheduleLiveApply(); });
   toggleCheck($('ckFine'), (on) => {
     state.weightFine = on;
     rWeight.step = on ? 1 : 100;
@@ -381,6 +383,7 @@ export function mountSettingsUI(root, ctx) {
     if (!b) return;
     state.source = b.dataset.src;
     reflectSource(state.source);
+    scheduleLiveApply();
   });
   reflectSource(state.source);
 
@@ -409,7 +412,7 @@ export function mountSettingsUI(root, ctx) {
   $('webFamily').addEventListener('input', (e) => { state.family = e.target.value; });
 
   // ---- code check ----
-  toggleCheck($('ckCode'), (on) => { state.codeEnabled = on; $('codeWrap').hidden = !on; });
+  toggleCheck($('ckCode'), (on) => { state.codeEnabled = on; $('codeWrap').hidden = !on; scheduleLiveApply(); });
   const ckCode = $('ckCode');
   ckCode.setAttribute('aria-checked', String(!!state.codeEnabled));
   ckCode.classList.toggle('on', !!state.codeEnabled);
@@ -428,11 +431,13 @@ export function mountSettingsUI(root, ctx) {
   blocklistEl.value = state.blocklist.join('\n');
   blocklistEl.addEventListener('input', () => {
     state.blocklist = blocklistEl.value.split('\n').map((s) => s.trim()).filter(Boolean);
+    scheduleLiveApply();
   });
   const protectEl = $('protect');
   protectEl.value = state.protectExtra.join('\n');
   protectEl.addEventListener('input', () => {
     state.protectExtra = protectEl.value.split('\n').map((s) => s.trim()).filter(Boolean);
+    scheduleLiveApply();
   });
 
   const host = ctx.currentHost || '';
@@ -448,6 +453,7 @@ export function mountSettingsUI(root, ctx) {
       if (!lines.includes(host)) { lines.push(host); }
       blocklistEl.value = lines.join('\n');
       state.blocklist = lines.slice();
+      scheduleLiveApply();
       const orig = addHost.textContent;
       addHost.textContent = '✓ 추가됨';
       setTimeout(() => { addHost.textContent = orig; }, 1200);
@@ -598,7 +604,21 @@ export function mountSettingsUI(root, ctx) {
     });
   }
 
-  // Wiring for sections/actions is added in later tasks. Expose for those tasks/tests:
-  const api = { root, ctx, state, applyPreview };
+  // ---- live apply to the current tab (debounced; popup only, transient until Save) ----
+  const previewTab = ctx.previewSend
+    || ((s) => { try { browser.tabs.sendMessage(ctx.tabId, { type: MSG.PREVIEW_SETTINGS, settings: s }); } catch {} });
+  let liveTimer;
+  scheduleLiveApply = () => {
+    if (!ready || ctx.context !== 'popup' || ctx.tabId == null) return;
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(() => previewTab(stateToSettings(state)), 300);
+  };
+  if (ctx.context === 'popup' && ctx.tabId != null && typeof window !== 'undefined' && window.addEventListener) {
+    // Best-effort revert of an unsaved live preview when the popup closes.
+    window.addEventListener('pagehide', () => { try { browser.tabs.sendMessage(ctx.tabId, { type: MSG.REAPPLY }); } catch {} });
+  }
+
+  ready = true; // gate live-apply so the initial mount doesn't fire it
+  const api = { root, ctx, state, applyPreview, scheduleLiveApply };
   return api;
 }
