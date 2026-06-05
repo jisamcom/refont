@@ -1,7 +1,7 @@
 // src/lib/storage.js
 import browser from 'webextension-polyfill';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const DEFAULTS = {
   schemaVersion: SCHEMA_VERSION,
@@ -14,6 +14,8 @@ export const DEFAULTS = {
   preserveBold: true,
   lineHeight: 0,
   letterSpacing: 0,
+  axes: '',          // raw variable-axis string, e.g. "opsz 14, wdth 80"
+  weightFine: false, // weight slider continuous (variable) vs 100-step
   blocklist: [],
   manualExclusions: {},
   protectionDenylistExtra: [],
