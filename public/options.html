@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>Refont 설정</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; }
+    fieldset { margin-bottom: 16px; border: 1px solid #ddd; border-radius: 8px; }
+    legend { font-weight: 600; }
+    label { display: block; margin: 8px 0 4px; }
+    input[type="text"], input[type="url"], textarea, select { width: 100%; box-sizing: border-box; padding: 6px; }
+    .row { display: flex; gap: 12px; }
+    .row > div { flex: 1; }
+    #preview { font-size: 22px; padding: 12px; border: 1px dashed #ccc; border-radius: 8px; margin-top: 8px; }
+    button { padding: 8px 14px; margin-right: 8px; }
+    .muted { color: #666; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Refont</h1>
+
+  <fieldset>
+    <legend>본문 폰트</legend>
+    <label><input type="checkbox" id="enabled" /> 확장 켜기</label>
+    <label>폰트 소스</label>
+    <select id="bodySource"><option value="system">시스템 설치 폰트</option><option value="weburl">웹폰트 URL</option></select>
+    <div id="systemFontWrap">
+      <label>설치된 폰트 (감지됨)</label>
+      <select id="detectedFonts"></select>
+      <label>직접 입력</label>
+      <input type="text" id="bodyName" placeholder="예: Pretendard" />
+    </div>
+    <div id="webFontWrap" hidden>
+      <label>URL 종류</label>
+      <select id="bodyUrlType"><option value="css">CSS/구글폰트 링크</option><option value="file">폰트 파일(.woff2/.ttf/.otf)</option></select>
+      <label>URL</label>
+      <input type="url" id="bodyUrl" placeholder="https://..." />
+      <label>패밀리명 (파일 URL일 때 필수)</label>
+      <input type="text" id="bodyWebName" placeholder="예: Pretendard" />
+    </div>
+    <div id="preview">다람쥐 헌 쳇바퀴에 타고파 The quick brown fox 0123456789</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>코드 폰트 (선택)</legend>
+    <label><input type="checkbox" id="codeEnabled" /> 코드/고정폭에 별도 폰트 사용</label>
+    <input type="text" id="codeName" placeholder="예: D2Coding" />
+  </fieldset>
+
+  <fieldset>
+    <legend>크기 · 두께 · 간격</legend>
+    <div class="row">
+      <div><label>배율(scale)</label><input type="number" id="scale" min="0.5" max="3" step="0.05" /></div>
+      <div><label>최소 크기(px, 0=끔)</label><input type="number" id="minSize" min="0" max="40" step="1" /></div>
+    </div>
+    <div class="row">
+      <div><label>두께(0=원본)</label><input type="number" id="weight" min="0" max="900" step="100" /></div>
+      <div><label><input type="checkbox" id="preserveBold" /> 볼드 위계 보존</label></div>
+    </div>
+    <div class="row">
+      <div><label>줄간격(0=끔)</label><input type="number" id="lineHeight" min="0" max="3" step="0.1" /></div>
+      <div><label>자간 px(0=끔)</label><input type="number" id="letterSpacing" min="-2" max="5" step="0.1" /></div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>사이트 제외 (블록리스트) · 한 줄에 하나</legend>
+    <textarea id="blocklist" rows="4" placeholder="docs.google.com/spreadsheets"></textarea>
+  </fieldset>
+
+  <fieldset>
+    <legend>보호 폰트 추가 (한 줄에 하나, family명 일부)</legend>
+    <textarea id="protectionExtra" rows="3" placeholder="예: my-custom-icons"></textarea>
+    <p class="muted">자동 감지가 놓친 아이콘/기능성 폰트가 깨질 때 여기에 추가하세요.</p>
+  </fieldset>
+
+  <div>
+    <button id="save">저장</button>
+    <button id="export">설정 내보내기</button>
+    <button id="import">설정 가져오기</button>
+    <input type="file" id="importFile" accept="application/json" hidden />
+    <span id="status" class="muted"></span>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
