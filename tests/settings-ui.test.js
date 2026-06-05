@@ -113,6 +113,26 @@ describe('scope + protection', () => {
   });
 });
 
+describe('per-site element exclusions', () => {
+  it('loads + edits manualExclusions for the current host (popup)', () => {
+    const root = document.createElement('div');
+    const api = mountSettingsUI(root, { context: 'popup', currentHost: 'shop.example.com', tabId: 1,
+      settings: { ...DEFAULTS, manualExclusions: { 'shop.example.com': ['.price'] } } });
+    const sel = root.querySelector('#selExclude');
+    expect(sel.value).toBe('.price');
+    sel.value = '.price\n.sku'; sel.dispatchEvent(new Event('input'));
+    expect(api.state.manualExclusions['shop.example.com']).toEqual(['.price', '.sku']);
+    sel.value = ''; sel.dispatchEvent(new Event('input'));
+    expect('shop.example.com' in api.state.manualExclusions).toBe(false);
+  });
+  it('hides the editor and shows a note in options context', () => {
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'options', currentHost: null, settings: { ...DEFAULTS } });
+    expect(root.querySelector('#selExclude').style.display).toBe('none');
+    expect(root.querySelector('#selNote').style.display).not.toBe('none');
+  });
+});
+
 describe('actions', () => {
   it('saves the current state via SAVE_SETTINGS', async () => {
     const sent = [];

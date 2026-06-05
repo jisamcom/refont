@@ -161,6 +161,11 @@ const MARKUP = `<div class="popup" id="popup">
         </div>
         <label class="field">블록리스트 (한 줄에 하나)</label>
         <textarea id="blocklist">docs.google.com/spreadsheets</textarea>
+        <details class="adv">
+          <summary>고급: 이 사이트의 특정 요소 제외 (CSS 선택자)</summary>
+          <span class="hint" id="selNote" style="display:none;font-size:11px;color:var(--ink-dim)"></span>
+          <textarea id="selExclude" placeholder="한 줄에 하나 — 예: .sidebar, code.hljs, [data-no-font]" style="margin-top:6px"></textarea>
+        </details>
       </section>
 
       <!-- PROTECTION -->
@@ -194,6 +199,9 @@ export function mountSettingsUI(root, ctx) {
   // ---- live specimen preview + sliders + weight + axes (scoped to root) ----
   const $ = (id) => root.querySelector('#' + id);
   const baseKr = 23, baseEn = 16, baseNum = 12;
+  // Reassigned to the real debounced page-applier in the actions block below;
+  // change handlers call it so edits also reflect on the current tab.
+  let scheduleLiveApply = () => {};
 
   function applyPreview() {
     const fam = "'" + state.family + "', system-ui, sans-serif";
@@ -434,6 +442,23 @@ export function mountSettingsUI(root, ctx) {
       const orig = addHost.textContent;
       addHost.textContent = '✓ 추가됨';
       setTimeout(() => { addHost.textContent = orig; }, 1200);
+    });
+  }
+
+  // per-site element exclusions (manualExclusions[host] = [css selectors])
+  const selEl = $('selExclude');
+  const selNote = $('selNote');
+  if (ctx.context === 'options' || !host) {
+    selEl.style.display = 'none';
+    selNote.style.display = '';
+    selNote.textContent = '팝업에서 사이트별로 설정하세요.';
+  } else {
+    selEl.value = (state.manualExclusions[host] || []).join('\n');
+    selEl.addEventListener('input', () => {
+      const list = selEl.value.split('\n').map((s) => s.trim()).filter(Boolean);
+      if (list.length) state.manualExclusions[host] = list;
+      else delete state.manualExclusions[host];
+      scheduleLiveApply();
     });
   }
 
