@@ -113,6 +113,20 @@ describe('scope + protection', () => {
   });
 });
 
+describe('reset to defaults', () => {
+  it('arms on first click, restores defaults on second click', () => {
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1,
+      settings: { ...DEFAULTS, scale: 2 }, previewSend: () => {} });
+    expect(root.querySelector('#vScale').textContent).toBe('2.00×');
+    const reset = root.querySelector('#reset');
+    reset.click();
+    expect(reset.textContent).toContain('한번 더');
+    reset.click();
+    expect(root.querySelector('#vScale').textContent).toBe('1.00×');
+  });
+});
+
 describe('live apply to current tab', () => {
   it('debounce-sends PREVIEW_SETTINGS to the tab on edit (popup)', () => {
     vi.useFakeTimers();

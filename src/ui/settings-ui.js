@@ -178,6 +178,10 @@ const MARKUP = `<div class="popup" id="popup">
         </details>
       </section>
 
+      <div class="footer">
+        <button class="btn-reset" id="reset">기본값으로 초기화</button>
+      </div>
+
     </div>
 
     <!-- ===== sticky actions ===== -->
@@ -603,6 +607,25 @@ export function mountSettingsUI(root, ctx) {
       toggleLbl.textContent = on ? '전체 켜짐' : '전체 꺼짐';
     });
   }
+
+  // ---- reset to defaults (two-click confirm; resets the form, live-applies, persists on Save) ----
+  const resetBtn = $('reset');
+  let resetArmed = false; let resetTimer;
+  resetBtn.addEventListener('click', () => {
+    if (!resetArmed) {
+      resetArmed = true;
+      resetBtn.textContent = '한번 더 눌러 초기화';
+      resetBtn.classList.add('confirm');
+      resetTimer = setTimeout(() => {
+        resetArmed = false; resetBtn.textContent = '기본값으로 초기화'; resetBtn.classList.remove('confirm');
+      }, 3000);
+      return;
+    }
+    clearTimeout(resetTimer);
+    root.innerHTML = '';
+    const fresh = mountSettingsUI(root, { ...ctx, settings: DEFAULTS });
+    fresh.scheduleLiveApply();
+  });
 
   // ---- live apply to the current tab (debounced; popup only, transient until Save) ----
   const previewTab = ctx.previewSend
