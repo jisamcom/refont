@@ -53,6 +53,12 @@
 - [ ] **Options tab parity:** `⤢` from the popup opens the full options tab with the identical UI; in options the current-site row reads "현재 사이트 없음" and the page-fonts list shows the popup hint; `⤢` is hidden there.
 - [ ] **Off state:** toggling a site off dims the body but you can still adjust controls (not frozen); in the options tab, global-off still lets you edit defaults.
 
+## Follow-up features
+- [ ] **사이트별 요소 제외:** 팝업 "이 사이트 제외 → 고급: 이 사이트의 특정 요소 제외 (CSS 선택자)"에 예: `.sidebar` 입력 → 저장 → 그 요소 폰트만 안 바뀜 (옵션탭에선 "팝업에서 설정" 안내만)
+- [ ] **편집 중 현재 탭 실시간 적용:** 슬라이더/폰트 변경 시 현재 페이지에 즉시 반영(저장 전). 저장 안 하고 팝업 닫거나 새로고침하면 원복, 저장하면 영구
+- [ ] **기본값 초기화:** 하단 "기본값으로 초기화" → "한번 더 눌러 초기화" → 폼 전체가 기본값으로(저장해야 영구). 블록리스트·보호목록 포함
+- [ ] **최근 사용 폰트:** 폰트 선택 후 피커 다시 열면 상단 "최근" 그룹에 표시(본문/코드 각각, 최대 5)
+
 ## Known limitations (v0.1)
 - **Google Fonts / CSS-link web fonts under strict CSP:** the `@import` route is subject to the page's `style-src`/`font-src` CSP and may be blocked. For CSP-strict sites, use a direct font-file URL (`.woff2/.ttf/.otf`) — that path fetches in the background and injects a `data:` `@font-face`, which bypasses CSP.
 - **Per-host selector exclusions (`manualExclusions`)** are not yet editable in the options UI; they can be set via settings Import for now. For protecting a font family that the auto-detector missed, use the "보호 폰트 추가" (protection denylist) field in options.
