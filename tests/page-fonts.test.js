@@ -29,4 +29,13 @@ describe('dedupeClassify', () => {
     const raw = Array.from({ length: 50 }, (_, i) => `Font${i}`);
     expect(dedupeClassify(['', '  ', ...raw], () => false, 40)).toHaveLength(40);
   });
+  it('excludes the applied body/code fonts (case-insensitive, quote-tolerant)', () => {
+    const out = dedupeClassify(
+      ['"Pretendard Variable", sans-serif', 'Consolas', '"Font Awesome 6 Free"'],
+      isProt,
+      40,
+      ['Pretendard Variable', '"Consolas"'],
+    );
+    expect(out).toEqual([{ name: 'Font Awesome 6 Free', protected: true }]);
+  });
 });

@@ -80,7 +80,14 @@ function collectPageFonts() {
     node = walker.nextNode();
   }
   const extra = (settings && settings.protectionDenylistExtra) || [];
-  return dedupeClassify(raw, (name) => isProtectedFamily(name, extra));
+  // Don't list Refont's own applied fonts — after apply, every [data-fc] element
+  // reports the chosen body font, which would otherwise dominate the list.
+  const exclude = [];
+  if (settings) {
+    if (settings.bodyFont && settings.bodyFont.name) exclude.push(settings.bodyFont.name);
+    if (settings.codeFont && settings.codeFont.name) exclude.push(settings.codeFont.name);
+  }
+  return dedupeClassify(raw, (name) => isProtectedFamily(name, extra), 40, exclude);
 }
 
 function startObserver() {
