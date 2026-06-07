@@ -1,0 +1,13 @@
+# Deterministic line endings across platforms. The repo stores LF for all text.
+# Without this, a Windows checkout (core.autocrlf=true) writes CRLF into the
+# working tree, which a non-normalizing git on macOS/Linux then reports as
+# whole-file churn — even though every committed blob is already LF.
+* text=auto eol=lf
+
+# Binary assets — never normalize.
+*.png   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
