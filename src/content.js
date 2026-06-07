@@ -6,10 +6,12 @@ import { buildCss, computeElementInline, sanitizeFamilyName } from './lib/engine
 import { shouldProtect, hasIconClassHint, isProtectedFamily } from './lib/font-protection.js';
 import { directText, isCodeElement } from './lib/dom-utils.js';
 import { dedupeClassify } from './lib/page-fonts.js';
+import { getSettings } from './lib/storage.js';
 
 let settings = null;
 let observer = null;
 let appliedCss = '';
+const STATIC_STYLE_ID = '__refont_style';
 const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'HEAD', 'META', 'LINK', 'TITLE']);
 
 function pseudoFamily(el, which) {
@@ -137,24 +139,57 @@ function clearMarks() {
   }
 }
 
+// Inject the cascade rule synchronously, in-page, as an author stylesheet. This
+// is the anti-flash path: unlike the user-origin sheet (which travels async
+// through the service worker), this <style> exists before the browser's first
+// paint, so a tagged element is already styled the instant the parser emits it.
+function injectStaticStyle(css) {
+  let style = document.getElementById(STATIC_STYLE_ID);
+  if (!style) {
+    style = document.createElement('style');
+    style.id = STATIC_STYLE_ID;
+  }
+  style.textContent = css;
+  // At document_start <head> doesn't exist yet; a <style> applies from <html> too.
+  // Appending last also lets it win same-specificity !important ties by source order.
+  (document.head || document.documentElement).appendChild(style);
+}
+
+function removeStaticStyle() {
+  const style = document.getElementById(STATIC_STYLE_ID);
+  if (style) style.remove();
+}
+
 // override: transient settings (live preview) that are applied but NOT persisted.
-// When omitted, the current settings are fetched from storage.
+// When omitted, settings are read straight from storage.local — no service-worker
+// wake-up — so the first paint isn't gated on a cold MV3 worker round-trip.
 async function apply(override) {
-  settings = override || await browser.runtime.sendMessage({ type: MSG.GET_SETTINGS });
+  settings = override || await getSettings();
   const active = settings.enabled && !isBlocked(location.href, settings.blocklist);
 
+  // --- teardown any previous application ---
   if (observer) { observer.disconnect(); observer = null; }
   clearMarks();
-  if (appliedCss) { await browser.runtime.sendMessage({ type: MSG.REMOVE_CSS, css: appliedCss }); appliedCss = ''; }
+  removeStaticStyle();
+  if (appliedCss) { browser.runtime.sendMessage({ type: MSG.REMOVE_CSS, css: appliedCss }).catch(() => {}); appliedCss = ''; }
   const oldWebFont = document.getElementById('__refont_webfont'); if (oldWebFont) oldWebFont.remove();
 
   if (!active) return;
 
   appliedCss = buildCss(settings);
-  await browser.runtime.sendMessage({ type: MSG.APPLY_CSS, css: appliedCss });
-  await injectWebFont();
-  startObserver();
+
+  // --- fast path (synchronous): the cascade rule and the first tagged elements
+  // land before the browser paints, so there's no flash of the original font. ---
+  injectStaticStyle(appliedCss);
+  injectWebFont().catch(() => {}); // @import/@font-face style appends synchronously
+  startObserver();                 // catches nodes as the parser streams them in
   scan(document.documentElement);
+
+  // --- reinforcement (async; does not gate first paint) ---
+  // User-origin sheet: its !important outranks author !important on the rare page
+  // that forces font-family on body text. The synchronous sheet above already
+  // covers the common case instantly.
+  browser.runtime.sendMessage({ type: MSG.APPLY_CSS, css: appliedCss }).catch(() => {});
 }
 
 browser.runtime.onMessage.addListener((msg) => {
@@ -166,3 +201,13 @@ browser.runtime.onMessage.addListener((msg) => {
 });
 
 apply().catch(() => {});
+
+// Safety net: if settings resolved late and the parser had already emitted most
+// of the document before the observer was live, re-tag once the DOM is complete.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    if (settings && settings.enabled && !isBlocked(location.href, settings.blocklist)) {
+      scan(document.documentElement);
+    }
+  }, { once: true });
+}

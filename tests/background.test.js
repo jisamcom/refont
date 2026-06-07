@@ -6,7 +6,20 @@ import { describe, it, expect, vi } from 'vitest';
 // browser-wiring guard in background.js false, so only pure exports load.
 vi.mock('webextension-polyfill', () => ({ default: {} }));
 
-import { guessFontMime, arrayBufferToBase64, fetchFontAsDataUrl } from '../src/background.js';
+import { guessFontMime, arrayBufferToBase64, fetchFontAsDataUrl, cssTarget } from '../src/background.js';
+
+describe('cssTarget', () => {
+  it('targets the sender frame so CSS reaches iframes (e.g. Naver Cafe #cafe_main)', () => {
+    // top frame
+    expect(cssTarget(7, 0)).toEqual({ tabId: 7, frameIds: [0] });
+    // a child iframe
+    expect(cssTarget(7, 3)).toEqual({ tabId: 7, frameIds: [3] });
+  });
+  it('falls back to the whole tab (top frame) when frameId is unknown', () => {
+    expect(cssTarget(7, undefined)).toEqual({ tabId: 7 });
+    expect(cssTarget(7, null)).toEqual({ tabId: 7 });
+  });
+});
 
 describe('guessFontMime', () => {
   it('maps extensions to mime types', () => {
