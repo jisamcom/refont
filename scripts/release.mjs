@@ -11,10 +11,11 @@
 //   - Aborts if tests fail (before touching any files) and if the tag already exists.
 //   - Commit messages carry NO Co-Authored-By trailer (project convention).
 //   - Pushes the specific tag, never `--tags` (avoids leaking local/backup tags).
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
+import { renderMarkdown, prependSection } from './lib/changelog.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -67,6 +68,20 @@ console.log('\n▶ Building + packaging…');
 run('bun run build');
 run('bun scripts/package.mjs');
 
+// ---- changelog (commit subjects since the previous version tag) ----
+console.log('\n▶ Generating changelog…');
+let prevTag = '';
+try { prevTag = cap('git describe --tags --abbrev=0 --match "v*"'); } catch { /* no prior tag */ }
+const range = prevTag ? `${prevTag}..HEAD` : 'HEAD';
+const subjects = cap(`git log ${range} --no-merges --pretty=format:%s`).split('\n').filter(Boolean);
+const date = new Date().toISOString().slice(0, 10);
+const section = renderMarkdown(version, date, subjects);
+const changelogPath = join(root, 'CHANGELOG.md');
+const existing = existsSync(changelogPath) ? readFileSync(changelogPath, 'utf8') : '';
+writeFileSync(changelogPath, prependSection(existing, section));
+writeFileSync(join(root, 'dist', `RELEASE_NOTES-${tag}.md`), section); // for manual paste if needed
+console.log(`  CHANGELOG.md updated (${subjects.length} commit(s) since ${prevTag || 'start'})`);
+
 // ---- commit + tag ----
 console.log('\n▶ Committing + tagging…');
 run('git add -A');
@@ -80,8 +95,49 @@ if (push) {
   run(`git push origin ${branch}`);
   run(`git push origin ${tag}`);
   console.log(`\n✓ Released ${tag} and pushed.`);
+  await createGithubRelease();
 } else {
   console.log(`\n✓ Committed + tagged ${tag} (not pushed).`);
   console.log(`  To publish:  git push origin ${branch} && git push origin ${tag}`);
 }
 console.log(`  Zips: dist/refont-{chrome,firefox,source}-${version}.zip`);
+console.log(`  Notes: dist/RELEASE_NOTES-${tag}.md`);
+
+// Create a GitHub Release (with the notes + zip assets) when a token is present.
+// The token is read ONLY from the GITHUB_TOKEN env var — never passed on the CLI
+// or stored — so it can't leak into shell history or the repo.
+async function createGithubRelease() {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) {
+    console.log('\nℹ GITHUB_TOKEN not set → skipping GitHub Release.');
+    console.log('  Create it manually (paste dist/RELEASE_NOTES-' + tag + '.md), or rerun with:');
+    console.log(`    GITHUB_TOKEN=… bun scripts/release.mjs ${version} --push`);
+    return;
+  }
+  const remote = cap('git remote get-url origin');
+  const m = remote.match(/github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/);
+  if (!m) { console.warn('! Could not parse owner/repo from origin; skipping GitHub Release.'); return; }
+  const [, owner, repo] = m;
+  const api = `https://api.github.com/repos/${owner}/${repo}`;
+  const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'refont-release' };
+  try {
+    console.log(`\n▶ Creating GitHub Release ${tag}…`);
+    const res = await fetch(`${api}/releases`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ tag_name: tag, name: tag, body: section }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    const rel = await res.json();
+    const uploadBase = rel.upload_url.replace(/\{.*\}$/, '');
+    for (const name of [`refont-chrome-${version}.zip`, `refont-firefox-${version}.zip`, `refont-source-${version}.zip`]) {
+      const data = readFileSync(join(root, 'dist', name));
+      const up = await fetch(`${uploadBase}?name=${encodeURIComponent(name)}`, {
+        method: 'POST', headers: { ...headers, 'Content-Type': 'application/zip' }, body: data,
+      });
+      console.log(up.ok ? `  ↑ ${name}` : `  ! upload failed ${name}: ${up.status}`);
+    }
+    console.log(`✓ GitHub Release: ${rel.html_url}`);
+  } catch (e) {
+    console.warn(`! GitHub Release failed (push + tag already done): ${e.message}`);
+  }
+}

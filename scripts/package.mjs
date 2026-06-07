@@ -67,6 +67,7 @@ const srcEntries = [
   ...fileEntry('package-lock.json'),
   ...fileEntry('vitest.config.js'),
   ...fileEntry('README.md'),
+  ...fileEntry('CHANGELOG.md'),
   ...fileEntry(join('docs', 'REVIEWERS.md')),
 ];
 const sourceBuf = zipSync(srcEntries);
