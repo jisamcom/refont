@@ -22,4 +22,15 @@ describe('settings import/export', () => {
     expect(parsed.scale).toBe(2);
     expect('hackedKey' in parsed).toBe(false);
   });
+  it('migrates an older (schema 3) export on import: px spacing → em', () => {
+    const v3 = JSON.stringify({ schemaVersion: 3, letterSpacing: 0.5, wordSpacing: 1.6 });
+    const parsed = parseSettings(v3);
+    expect(parsed.letterSpacing).toBe(0.031); // 0.5 / 16
+    expect(parsed.wordSpacing).toBe(0.1); // 1.6 / 16
+    expect(parsed.schemaVersion).toBe(4);
+  });
+  it('rejects a non-object JSON payload', () => {
+    expect(() => parseSettings('5')).toThrow();
+    expect(() => parseSettings('[1,2]')).toThrow();
+  });
 });

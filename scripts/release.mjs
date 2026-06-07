@@ -36,6 +36,17 @@ const commitMsg = message || `release: ${tag}`;
 const run = (cmd, opts = {}) => execSync(cmd, { cwd: root, stdio: 'inherit', ...opts });
 const cap = (cmd) => execSync(cmd, { cwd: root }).toString().trim();
 
+// Pick the runner that's actually installed. The repo's documented flow is
+// npm/node; this machine uses Bun. Detect Bun and fall back to npm/node so the
+// release works in either environment.
+const has = (bin) => { try { execSync(`command -v ${bin}`, { stdio: 'ignore' }); return true; } catch { return false; } };
+const useBun = has('bun');
+const CMD = {
+  test: useBun ? 'bun run test' : 'npm test',
+  build: useBun ? 'bun run build' : 'npm run build',
+  package: useBun ? 'bun scripts/package.mjs' : 'node scripts/package.mjs',
+};
+
 // ---- preflight: clean-ish? tag free? tests green? ----
 if (cap(`git tag -l ${tag}`)) {
   console.error(`Tag ${tag} already exists. Bump to a new version.`);
@@ -44,8 +55,8 @@ if (cap(`git tag -l ${tag}`)) {
 const branch = cap('git rev-parse --abbrev-ref HEAD');
 
 console.log(`\n▶ Releasing ${tag} on ${branch}\n`);
-console.log('▶ Running tests…');
-run('bun run test');
+console.log(`▶ Running tests… (${useBun ? 'bun' : 'npm'})`);
+run(CMD.test);
 
 // ---- bump version in the three manifests + the UI badge ----
 function patch(rel, transform) {
@@ -65,8 +76,8 @@ patch('src/ui/settings-ui.js', (s) => s.replace(/(<span class="ver">v)[^<]*(<\/s
 
 // ---- build + package ----
 console.log('\n▶ Building + packaging…');
-run('bun run build');
-run('bun scripts/package.mjs');
+run(CMD.build);
+run(CMD.package);
 
 // ---- changelog (commit subjects since the previous version tag) ----
 console.log('\n▶ Generating changelog…');
