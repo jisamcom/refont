@@ -168,7 +168,15 @@ function scheduleFlush() {
 function startObserver() {
   observer = new MutationObserver((muts) => {
     for (const m of muts) {
-      for (const n of m.addedNodes) if (n.nodeType === 1) pendingRoots.add(n);
+      for (const n of m.addedNodes) {
+        if (n.nodeType === 1) pendingRoots.add(n); // element subtree added → scan it
+        // A *text node* added to an existing element (the common ExtJS/jQuery
+        // pattern: create an empty element, then fill it via textContent/innerHTML
+        // /appendChild). That's a childList mutation, not characterData, and the
+        // element was likely scanned-and-skipped while still empty — so re-scan
+        // the target now that it holds direct text.
+        else if (n.nodeType === 3 && m.target && m.target.nodeType === 1) pendingRoots.add(m.target);
+      }
       if (m.type === 'characterData' && m.target.parentElement) pendingRoots.add(m.target.parentElement);
     }
     if (pendingRoots.size) scheduleFlush();
@@ -205,10 +213,15 @@ async function injectWebFont() {
 // CSS Font Loading API: proactively trigger a download of the chosen families so
 // the swap happens as soon as possible instead of lazily on first paint of a
 // matching glyph. This is purely a fetch hint — the actual application is still
-// the CSS-variable engine — so it never forces layout or blocks. Most useful for
-// the @import/CSS web-font path (whose font isn't inlined). No-op where the API
-// or the family is absent. (document.fonts.ready, used by the popup, is the
+// the CSS-variable engine — so it never forces layout or blocks. No-op where the
+// API or the family is absent. (document.fonts.ready, used by the popup, is the
 // matching post-layout readback; here we only kick off loads.)
+//
+// Reliability of font-display:optional depends on this. `optional` permanently
+// drops a font that isn't ready within its ~100ms block window; calling
+// document.fonts.load() right after the @font-face is injected forces that face
+// to decode immediately (the file path is an inlined data: URL, so it's ready
+// almost at once), so the chosen font actually shows instead of being dropped.
 function warmFonts() {
   try {
     if (!settings || !document.fonts || !document.fonts.load) return;

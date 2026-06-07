@@ -116,10 +116,10 @@ export function buildDynamicCss(settings) {
     rules.push(`[data-fc]:not([data-fc-code]){line-height:${s.lineHeight} !important;}`);
   }
   if (s.letterSpacing && s.letterSpacing !== 0) {
-    rules.push(`[data-fc]:not([data-fc-code]){letter-spacing:${s.letterSpacing}px !important;}`);
+    rules.push(`[data-fc]:not([data-fc-code]){letter-spacing:${s.letterSpacing}em !important;}`);
   }
   if (s.wordSpacing && s.wordSpacing > 0) {
-    rules.push(`[data-fc]:not([data-fc-code]){word-spacing:${s.wordSpacing}px !important;}`);
+    rules.push(`[data-fc]:not([data-fc-code]){word-spacing:${s.wordSpacing}em !important;}`);
   }
   // Width dial → font-stretch via a variable (cheap to drag, like weight).
   if ((s.width || 0) > 0) {

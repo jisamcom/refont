@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Refont cascade smoke test</title>
+<style>
+  /* The page AUTHOR forces body text with !important — the hardest case for an
+     extension to override. Refont injects a USER-origin !important sheet, which
+     per the CSS cascade beats author !important. If Refont wins, the paragraphs
+     below change font + grow past 11px; if it loses, they stay tiny Times. */
+  p.forced {
+    font-family: "Times New Roman", serif !important;
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+  }
+  body { max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+  .hint { color: #888; font-size: 13px; }
+</style>
+</head>
+<body>
+  <h1>Refont 캐스케이드 스모크 테스트</h1>
+  <p class="hint">아래 문단은 페이지가 <code>font-family</code>와 <code>font-size:11px</code>를
+  <code>!important</code>로 강제합니다. Refont를 켜고 본문 폰트를 다른 것(예: Pretendard /
+  나눔고딕)으로 바꾸고 최소 크기 18px를 설정하세요.</p>
+
+  <p class="forced">가나다라마바사 아자차카타파하 — The quick brown fox jumps over the lazy dog. 0123456789</p>
+  <p class="forced">다람쥐 헌 쳇바퀴에 타고파. Sphinx of black quartz, judge my vow.</p>
+
+  <ul class="hint">
+    <li><b>통과:</b> 위 두 문단이 선택한 폰트로 바뀌고 11px보다 커짐 → USER <code>!important</code>가 author <code>!important</code>를 이김.</li>
+    <li><b>실패:</b> 그대로 11px Times로 남음 → 캐스케이드 전략이 안 먹힘(조사 필요).</li>
+    <li>Firefox와 Chrome 양쪽에서 동일하게 통과해야 합니다. (w3c/webextensions#906은 Chrome의 author-origin 주입 버그라 우리 USER-origin 경로와 무관)</li>
+  </ul>
+</body>
+</html>

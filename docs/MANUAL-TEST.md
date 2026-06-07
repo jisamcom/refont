@@ -34,6 +34,7 @@
 - [ ] Keyboard shortcut Alt+Shift+F toggles current site
 - [ ] Web font by Google Fonts CSS link works
 - [ ] Web font by direct .woff2 URL works on a CSP-strict site (data URL path)
+- [ ] **font-display: optional reliability:** set a direct .woff2 URL + font-display `optional` → hard-reload a heavy page; the chosen font still renders (is NOT dropped to fallback). Confirms the document.fonts.load() warm-up loads the face inside the block window.
 - [ ] Options export → import round-trips settings
 - [ ] SPA (e.g. YouTube/Twitter) — new content gets the font as you scroll
 - [ ] **Iframe content (regression fix):** Naver Cafe article page (`cafe.naver.com/.../articles/...`, body renders in `<iframe id="cafe_main">`) — article text, nicknames, and comments all get the chosen font, not just the outer shell. Spot-check another iframe-bodied site (e.g. an embedded forum / docs widget).
@@ -43,11 +44,7 @@
 > Refont's font/size overrides ride a **user-origin `!important`** stylesheet (via `scripting.insertCSS({origin:'USER'})`). Per CSS Cascade, user-`!important` beats author-`!important`; MDN states Firefox's `origin:'USER'` injects at the real user origin and the Chrome mis-filing bug (w3c/webextensions#906) is Chrome-only ("Firefox behaves correctly"). This is the 5-minute empirical confirmation of that docs-based claim.
 
 1. `npm run build:firefox` → load `dist/firefox` as a temporary add-on.
-2. Open a page whose CSS forces body text with author `!important`, e.g. a quick local file:
-   ```html
-   <style>p{font-family:"Times New Roman" !important; font-size:11px !important;}</style>
-   <p>가나다 ABC 0123 — author forced this with !important</p>
-   ```
+2. Open **`docs/cascade-smoke-test.html`** (a fixture that forces body text with author `!important`; `file://` is fine).
 3. Set Refont body font to a clearly different font (e.g. Pretendard / Nanum Gothic) and a min-size (e.g. 18px), Save.
 - [ ] **Firefox:** the paragraph shows Refont's font and ≥18px — i.e. Refont's USER `!important` **beats** the page's author `!important` (not stuck on 11px Times).
 - [ ] **Chrome:** same page → same win (sanity that both browsers behave for our USER-origin path).
@@ -59,6 +56,7 @@
 - [ ] **Popup = full settings:** clicking the toolbar icon shows the whole settings UI (not just two buttons); white background, cobalt accent.
 - [ ] **Live preview (the v0.1 bug):** dragging scale / weight / line-height / letter-spacing updates the top specimen (KR + EN + numerals) in real time — not just font-family.
 - [ ] **Value chips on load:** open the popup after saving non-default values — the scale/min/lh/ls chips and weight show the *saved* values immediately (not "1.10×"/"700").
+- [ ] **설치된 폰트 정확히 불러오기 (Local Font Access, Chrome/Edge):** the button appears under the body picker in Chromium; clicking it prompts for the `local-fonts` permission, then the body picker gains the exact installed-font names (shows "✓ N개 추가됨"). Denying shows "권한 거부됨" and the heuristic list still works. In **Firefox** the button is **hidden** and the heuristic list is used (no regression).
 - [ ] **Font picker:** opens a searchable list; each row renders in its own font; Korean-named fonts show Korean (맑은 고딕/바탕/굴림…); typing an unlisted name offers "직접 사용"; search works in Korean (e.g. "나눔").
 - [ ] **Code font section:** enabling "코드/고정폭에 별도 폰트" reveals the code picker + a code preview that re-renders in the chosen mono font.
 - [ ] **Weight ticks + fine mode:** ticks highlight near the value; "미세조정 (variable)" switches the slider to 1-step; "원본" shows when weight is unset.

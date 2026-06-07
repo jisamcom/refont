@@ -4,6 +4,7 @@ import { MSG } from '../lib/messaging.js';
 import { DEFAULTS } from '../lib/storage.js';
 import { serializeSettings, parseSettings } from '../lib/settings-io.js';
 import { parseAxes, splitTextAxes } from '../lib/engine.js';
+import { localFontsSupported, queryInstalledFamilies } from '../lib/local-fonts.js';
 import { labelOf, toOptions } from './font-names.js';
 import { makeFontPicker } from './font-picker.js';
 
@@ -13,7 +14,9 @@ export function settingsToState(s) {
   return {
     enabled: s.enabled,
     source: bf.source || 'system',
-    family: bf.name || '',
+    // Never leave the body family empty: the picker only *displays* a default,
+    // so an empty state would be saved verbatim and force generic sans-serif.
+    family: bf.name || DEFAULTS.bodyFont.name,
     url: bf.url || '',
     urlType: bf.urlType || 'css',
     webfontDisplay: s.webfontDisplay || 'swap',
@@ -58,7 +61,7 @@ const MARKUP = `<div class="popup" id="popup">
     <!-- ===== sticky top ===== -->
     <div class="top">
       <div class="brandrow">
-        <div class="brand"><span class="mark">Refont<span class="dot">.</span></span><span class="ver">v0.2.1</span></div>
+        <div class="brand"><span class="mark">Refont<span class="dot">.</span></span><span class="ver">v0.2.2</span></div>
         <div class="toggle on" id="toggle" role="switch" aria-checked="true" tabindex="0">
           <span class="lbl" id="toggleLbl">이 사이트 켜짐</span>
           <span class="switch"></span>
@@ -88,6 +91,7 @@ const MARKUP = `<div class="popup" id="popup">
         <div id="srcSystem">
           <label class="field">폰트 · 검색하거나 직접 입력</label>
           <div class="fp" id="bodyPicker"></div>
+          <button class="btn-add" id="loadLocal" type="button" hidden style="margin-top:8px">설치된 폰트 정확히 불러오기</button>
         </div>
 
         <div id="srcWeb" hidden>
@@ -123,12 +127,12 @@ const MARKUP = `<div class="popup" id="popup">
           <input type="range" id="rLh" min="0" max="2.6" step="0.05" value="0" />
         </div>
         <div class="ctl">
-          <div class="row"><span class="name">자간</span><span class="val" id="vLs">0.0px</span></div>
-          <input type="range" id="rLs" min="-1" max="4" step="0.1" value="0" />
+          <div class="row"><span class="name">자간</span><span class="val" id="vLs">0.00em</span></div>
+          <input type="range" id="rLs" min="-0.05" max="0.3" step="0.01" value="0" />
         </div>
         <div class="ctl">
           <div class="row"><span class="name">어절 간격</span><span class="val off" id="vWs">끔</span></div>
-          <input type="range" id="rWs" min="0" max="8" step="0.5" value="0" />
+          <input type="range" id="rWs" min="0" max="0.5" step="0.02" value="0" />
         </div>
       </section>
 
@@ -239,8 +243,8 @@ export function mountSettingsUI(root, ctx) {
   function applyPreview() {
     const fam = "'" + state.family + "', system-ui, sans-serif";
     const w = String(state.weight || 400);
-    const ls = state.letterSpacing ? state.letterSpacing + 'px' : '';
-    const ws = state.wordSpacing > 0 ? state.wordSpacing + 'px' : '';
+    const ls = state.letterSpacing ? state.letterSpacing + 'em' : '';
+    const ws = state.wordSpacing > 0 ? state.wordSpacing + 'em' : '';
     const lh = state.lineHeight > 0 ? state.lineHeight : '';
     // Mirror the engine's split: registered axes → standard props, custom → FVS.
     const { std, custom } = splitTextAxes(state);
@@ -280,8 +284,8 @@ export function mountSettingsUI(root, ctx) {
     if (state.opticalSizing === 'none') parts.push({ t: 'opsz 끔' });
     if (state.minSize > 0) parts.push({ t: 'min ' + state.minSize + 'px' });
     if (state.lineHeight > 0) parts.push({ t: 'lh ' + state.lineHeight.toFixed(2) });
-    if (state.letterSpacing != 0) parts.push({ t: 'ls ' + state.letterSpacing.toFixed(1) });
-    if (state.wordSpacing > 0) parts.push({ t: 'ws ' + state.wordSpacing.toFixed(1) });
+    if (state.letterSpacing != 0) parts.push({ t: 'ls ' + state.letterSpacing.toFixed(2) + 'em' });
+    if (state.wordSpacing > 0) parts.push({ t: 'ws ' + state.wordSpacing.toFixed(2) + 'em' });
     parseAxes(state.axes).forEach((a) => parts.push({ t: a.tag + ' ' + a.val }));
     r.replaceChildren();
     parts.forEach((p, i) => {
@@ -317,12 +321,12 @@ export function mountSettingsUI(root, ctx) {
     if (state.lineHeight === 0) { v.textContent = '끔'; v.classList.add('off'); }
     else { v.textContent = state.lineHeight.toFixed(2); v.classList.remove('off'); }
   };
-  const updLs = () => { state.letterSpacing = +rLs.value; $('vLs').textContent = state.letterSpacing.toFixed(1) + 'px'; };
+  const updLs = () => { state.letterSpacing = +rLs.value; $('vLs').textContent = state.letterSpacing.toFixed(2) + 'em'; };
   const updWs = () => {
     state.wordSpacing = +rWs.value;
     const v = $('vWs');
     if (state.wordSpacing === 0) { v.textContent = '끔'; v.classList.add('off'); }
-    else { v.textContent = state.wordSpacing.toFixed(1) + 'px'; v.classList.remove('off'); }
+    else { v.textContent = state.wordSpacing.toFixed(2) + 'em'; v.classList.remove('off'); }
   };
   const updWeight = () => { state.weight = +rWeight.value; $('vWeight').textContent = state.weight; markTicks(); };
   const updWidth = () => { state.width = +rWidth.value; const v = $('vWidth'); v.textContent = state.width + '%'; v.classList.remove('off'); };
@@ -338,9 +342,9 @@ export function mountSettingsUI(root, ctx) {
   // Font-agnostic (works on Korean too); does NOT touch family/color.
   $('presetA11y').addEventListener('click', () => {
     rMin.value = 18; updMin(); setP(rMin);
-    rLh.value = 1.7; updLh(); setP(rLh);
-    rLs.value = 0.5; updLs(); setP(rLs);
-    rWs.value = 1.5; updWs(); setP(rWs);
+    rLh.value = 1.7; updLh(); setP(rLh);          // WCAG 1.4.12: line-height ≥ 1.5
+    rLs.value = 0.12; updLs(); setP(rLs);         // WCAG 1.4.12: letter-spacing ≥ 0.12em
+    rWs.value = 0.16; updWs(); setP(rWs);         // WCAG 1.4.12: word-spacing ≥ 0.16em
     applyPreview();
   });
 
@@ -419,8 +423,6 @@ export function mountSettingsUI(root, ctx) {
   applyPreview();
 
   // ---- font pickers (body + code) ----
-  const bodyOpts = toOptions(ctx.installedFonts || []);
-  const monoOpts = toOptions(ctx.monoFonts || []);
   function pushRecent(kind, fam) {
     const arr = state.recentFonts[kind];
     const i = arr.indexOf(fam);
@@ -428,27 +430,56 @@ export function mountSettingsUI(root, ctx) {
     arr.unshift(fam);
     if (arr.length > 5) arr.length = 5;
   }
-
-  const bp = makeFontPicker($('bodyPicker'), {
-    fonts: bodyOpts,
-    value: state.family || 'Pretendard Variable',
-    sample: 'Aa가',
-    recent: () => state.recentFonts.body,
-    onChange: (f) => { state.family = f; pushRecent('body', f); applyPreview(); scheduleLiveApply(); },
-  });
-
   function updateCodePrev(f) {
     root.querySelectorAll('#codePrev .ln').forEach((l) => { l.style.fontFamily = "'" + f + "', ui-monospace, monospace"; });
   }
 
-  const cp = makeFontPicker($('codePicker'), {
-    fonts: monoOpts,
-    value: state.codeFamily || 'Consolas',
-    sample: '{ }',
-    recent: () => state.recentFonts.code,
-    onChange: (f) => { state.codeFamily = f; pushRecent('code', f); updateCodePrev(f); scheduleLiveApply(); },
-  });
+  // Picker lists start from the heuristic-detected sets; the Local Font Access
+  // button (Chromium only) can enrich the body list with the exact installed
+  // names. bp/cp are rebuilt in place when that happens.
+  let bodyFams = (ctx.installedFonts || []).slice();
+  const monoFams = (ctx.monoFonts || []).slice();
+  let bp, cp;
+  function buildPickers() {
+    bp = makeFontPicker($('bodyPicker'), {
+      fonts: toOptions(bodyFams),
+      value: state.family || 'Pretendard Variable',
+      sample: 'Aa가',
+      recent: () => state.recentFonts.body,
+      onChange: (f) => { state.family = f; pushRecent('body', f); applyPreview(); scheduleLiveApply(); },
+    });
+    cp = makeFontPicker($('codePicker'), {
+      fonts: toOptions(monoFams),
+      value: state.codeFamily || 'Consolas',
+      sample: '{ }',
+      recent: () => state.recentFonts.code,
+      onChange: (f) => { state.codeFamily = f; pushRecent('code', f); updateCodePrev(f); scheduleLiveApply(); },
+    });
+  }
+  buildPickers();
   updateCodePrev(state.codeFamily || 'Consolas');
+
+  // Local Font Access: exact installed-font enumeration (Chromium/Edge desktop
+  // only; needs the user gesture below + the 'local-fonts' permission). Hidden
+  // where unsupported (Firefox/Safari/mobile) — those keep the heuristic list.
+  const loadLocalBtn = $('loadLocal');
+  if (loadLocalBtn && localFontsSupported()) {
+    loadLocalBtn.hidden = false;
+    loadLocalBtn.addEventListener('click', async () => {
+      const orig = loadLocalBtn.textContent;
+      try {
+        const fams = await queryInstalledFamilies();
+        const have = new Set(bodyFams);
+        let added = 0;
+        for (const f of fams) if (!have.has(f)) { bodyFams.push(f); have.add(f); added += 1; }
+        buildPickers();
+        loadLocalBtn.textContent = `✓ ${added}개 추가됨`;
+      } catch {
+        loadLocalBtn.textContent = '권한 거부됨';
+      }
+      setTimeout(() => { loadLocalBtn.textContent = orig; }, 1600);
+    });
+  }
 
   // ---- source segmented control ----
   function reflectSource(source) {

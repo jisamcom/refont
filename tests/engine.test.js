@@ -99,12 +99,12 @@ describe('buildDynamicCss', () => {
   it('is identical for different weight *values* (value lives in the variable)', () => {
     expect(buildDynamicCss({ weight: 300, preserveBold: true })).toBe(buildDynamicCss({ weight: 900, preserveBold: true }));
   });
-  it('emits line-height / letter-spacing / word-spacing only when nonzero, skipping code', () => {
+  it('emits line-height / letter-spacing / word-spacing (em) only when nonzero, skipping code', () => {
     expect(buildDynamicCss({ lineHeight: 0, letterSpacing: 0, wordSpacing: 0 })).toBe('');
-    const css = buildDynamicCss({ lineHeight: 1.6, letterSpacing: 0.5, wordSpacing: 2 });
+    const css = buildDynamicCss({ lineHeight: 1.6, letterSpacing: 0.12, wordSpacing: 0.16 });
     expect(css).toContain('[data-fc]:not([data-fc-code]){line-height:1.6 !important;}');
-    expect(css).toContain('letter-spacing:0.5px');
-    expect(css).toContain('[data-fc]:not([data-fc-code]){word-spacing:2px !important;}');
+    expect(css).toContain('letter-spacing:0.12em');
+    expect(css).toContain('[data-fc]:not([data-fc-code]){word-spacing:0.16em !important;}');
   });
   it('routes registered axes to standard props and customs to font-variation-settings', () => {
     expect(buildDynamicCss({ axes: '' })).not.toContain('font-variation-settings');
