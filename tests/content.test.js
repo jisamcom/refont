@@ -136,6 +136,17 @@ describe('content var-engine', () => {
     fakeBrowser.runtime.sendMessage.mockImplementation(async () => ({}));
   });
 
+  it('tags an element whose text is added AFTER it is inserted (dynamic textContent — ExtJS/jQuery)', async () => {
+    await freshApply(makeSettings());
+    const d = document.createElement('div');
+    document.body.appendChild(d); // inserted empty → scanned + skipped (no direct text)
+    await tick();
+    expect(d.hasAttribute('data-fc')).toBe(false);
+    d.textContent = 'filled later'; // text node added to an existing element (childList, not characterData)
+    await tick();
+    expect(d.hasAttribute('data-fc')).toBe(true);
+  });
+
   it('leaves a protected (icon-font) element untouched', async () => {
     document.body.innerHTML = '<span id="ic" style="font-family:FontAwesome;font-size:12px">icon</span>';
     await freshApply(makeSettings({ scale: 2 }));

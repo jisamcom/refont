@@ -54,17 +54,45 @@ describe('getSettings/saveSettings', () => {
 });
 
 describe('redesign fields', () => {
-  it('defaults axes, weightFine, recentFonts; schema is 3', () => {
+  it('defaults axes, weightFine, recentFonts; schema is current', () => {
     expect(DEFAULTS.axes).toBe('');
     expect(DEFAULTS.weightFine).toBe(false);
     expect(DEFAULTS.recentFonts).toEqual({ body: [], code: [] });
-    expect(SCHEMA_VERSION).toBe(3);
+    expect(SCHEMA_VERSION).toBe(4);
   });
   it('migrate fills new fields for an older object and bumps version', () => {
     const m = migrate({ schemaVersion: 1, scale: 1.2 });
     expect(m.axes).toBe('');
     expect(m.weightFine).toBe(false);
     expect(m.recentFonts).toEqual({ body: [], code: [] });
-    expect(m.schemaVersion).toBe(3);
+    expect(m.schemaVersion).toBe(SCHEMA_VERSION);
+  });
+});
+
+describe('schema 4: px → em spacing migration', () => {
+  it('converts legacy px letter/word-spacing to em (÷16) for pre-v4 settings', () => {
+    const m = migrate({ schemaVersion: 3, letterSpacing: 0.5, wordSpacing: 1.6 });
+    expect(m.letterSpacing).toBe(0.031); // 0.5/16
+    expect(m.wordSpacing).toBe(0.1); // 1.6/16
+    expect(m.schemaVersion).toBe(4);
+  });
+  it('leaves zero spacing untouched and does not re-convert v4 settings', () => {
+    expect(migrate({ schemaVersion: 3, letterSpacing: 0 }).letterSpacing).toBe(0);
+    expect(migrate({ schemaVersion: 4, letterSpacing: 0.12 }).letterSpacing).toBe(0.12);
+  });
+});
+
+describe('body-font self-heal', () => {
+  it('default body font is a real family, not empty', () => {
+    expect(DEFAULTS.bodyFont.name).toBeTruthy();
+  });
+  it('fills an empty system body-font name with the default (avoids forced sans-serif)', () => {
+    const m = migrate({ schemaVersion: 4, bodyFont: { source: 'system', name: '', url: null, urlType: 'css' } });
+    expect(m.bodyFont.name).toBe(DEFAULTS.bodyFont.name);
+  });
+  it('does not override a chosen system font or a web-font source', () => {
+    expect(migrate({ bodyFont: { source: 'system', name: 'Georgia' } }).bodyFont.name).toBe('Georgia');
+    const web = migrate({ bodyFont: { source: 'weburl', name: '', url: 'https://x/f.css', urlType: 'css' } });
+    expect(web.bodyFont.name).toBe(''); // weburl empty left as-is
   });
 });

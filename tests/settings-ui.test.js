@@ -77,11 +77,11 @@ describe('live preview wiring', () => {
     root.querySelector('#presetA11y').click();
     expect(api.state.minSize).toBe(18);
     expect(api.state.lineHeight).toBe(1.7);
-    expect(api.state.letterSpacing).toBe(0.5);
-    expect(api.state.wordSpacing).toBe(1.5);
+    expect(api.state.letterSpacing).toBe(0.12); // WCAG 1.4.12 em values
+    expect(api.state.wordSpacing).toBe(0.16);
     // chips + specimen reflect it
     expect(root.querySelector('#vMin').textContent).toBe('18px');
-    expect(root.querySelector('#sKr').style.wordSpacing).toBe('1.5px');
+    expect(root.querySelector('#sKr').style.wordSpacing).toBe('0.16em');
   });
 
   it('drives specimen font-stretch from the width dial and font-optical-sizing from the toggle', () => {
@@ -100,12 +100,12 @@ describe('live preview wiring', () => {
   it('syncs the value chips to loaded settings on mount (not just on input)', () => {
     const root = document.createElement('div');
     mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1,
-      settings: { ...DEFAULTS, scale: 1.5, minSize: 18, lineHeight: 1.8, letterSpacing: 0.5, weight: 0 } });
+      settings: { ...DEFAULTS, scale: 1.5, minSize: 18, lineHeight: 1.8, letterSpacing: 0.12, weight: 0 } });
     expect(root.querySelector('#vScale').textContent).toBe('1.50×');
     expect(root.querySelector('#vMin').textContent).toBe('18px');
     expect(root.querySelector('#vMin').classList.contains('off')).toBe(false);
     expect(root.querySelector('#vLh').textContent).toBe('1.80');
-    expect(root.querySelector('#vLs').textContent).toBe('0.5px');
+    expect(root.querySelector('#vLs').textContent).toBe('0.12em');
     expect(root.querySelector('#vWeight').textContent).toBe('원본'); // weight:0 preserved
   });
 
@@ -130,6 +130,30 @@ describe('font pickers', () => {
     const batang = [...root.querySelectorAll('#bodyPicker .o-name')].find((n) => n.textContent === '바탕');
     batang.closest('.fp-opt').click();
     expect(api.state.family).toBe('Batang');
+  });
+});
+
+describe('Local Font Access picker', () => {
+  it('hides the load-local button where queryLocalFonts is unavailable', () => {
+    delete globalThis.window.queryLocalFonts;
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1, settings: { ...DEFAULTS },
+      installedFonts: ['Georgia'], monoFonts: ['Consolas'] });
+    expect(root.querySelector('#loadLocal').hidden).toBe(true);
+  });
+  it('shows the button and adds queried families to the body picker (Chromium path)', async () => {
+    globalThis.window.queryLocalFonts = async () => ([{ family: 'Wingaroo Sans' }, { family: 'Georgia' }]);
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1, settings: { ...DEFAULTS },
+      installedFonts: ['Georgia'], monoFonts: ['Consolas'] });
+    const btn = root.querySelector('#loadLocal');
+    expect(btn.hidden).toBe(false);
+    btn.click();
+    await new Promise((r) => setTimeout(r, 0));
+    root.querySelector('#bodyPicker .fp-btn').click();
+    const names = [...root.querySelectorAll('#bodyPicker .o-name')].map((n) => n.textContent);
+    expect(names).toContain('Wingaroo Sans'); // newly enumerated family is now pickable
+    delete globalThis.window.queryLocalFonts;
   });
 });
 
