@@ -35,6 +35,8 @@
 - [ ] Web font by direct .woff2 URL works on a CSP-strict site (data URL path)
 - [ ] Options export → import round-trips settings
 - [ ] SPA (e.g. YouTube/Twitter) — new content gets the font as you scroll
+- [ ] **Iframe content (regression fix):** Naver Cafe article page (`cafe.naver.com/.../articles/...`, body renders in `<iframe id="cafe_main">`) — article text, nicknames, and comments all get the chosen font, not just the outer shell. Spot-check another iframe-bodied site (e.g. an embedded forum / docs widget).
+- [ ] **No flash of original font (FOUC):** hard-reload a heavy site (cold service worker) — text should appear directly in the chosen font without a visible swap/flicker from the original. Compare a normal site and an iframe site.
 
 ## Redesigned UI (shared popup + options component)
 > **Test gotcha:** a *loaded* Refont overrides inline fonts on `<all_urls>` pages, so any standalone preview/mockup page may look "stuck" on one font. The real popup/options run on `chrome-extension://` pages and are NOT affected. If something looks wrong, re-check with Refont disabled or in an incognito window.

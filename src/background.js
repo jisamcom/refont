@@ -30,13 +30,23 @@ export async function fetchFontAsDataUrl(url, fetchFn = fetch) {
   return `data:${guessFontMime(url)};base64,${arrayBufferToBase64(buf)}`;
 }
 
-// ---- Browser wiring (no-ops in unit tests where runtime is absent) ----
-async function applyCssToTab(tabId, css) {
-  if (!css) return;
-  await browser.scripting.insertCSS({ target: { tabId }, css, origin: 'USER' });
+// Build the insertCSS/removeCSS target. Targeting the *sender's* frame is what
+// makes the font reach content rendered inside iframes (e.g. Naver Cafe renders
+// its article in a same-origin <iframe id="cafe_main">). Omitting frameIds makes
+// Chrome inject into the top frame only, so iframe text keeps its original font.
+export function cssTarget(tabId, frameId) {
+  const target = { tabId };
+  if (frameId != null) target.frameIds = [frameId];
+  return target;
 }
-async function removeCssFromTab(tabId, css) {
-  try { await browser.scripting.removeCSS({ target: { tabId }, css, origin: 'USER' }); } catch {}
+
+// ---- Browser wiring (no-ops in unit tests where runtime is absent) ----
+async function applyCssToTab(tabId, css, frameId) {
+  if (!css) return;
+  await browser.scripting.insertCSS({ target: cssTarget(tabId, frameId), css, origin: 'USER' });
+}
+async function removeCssFromTab(tabId, css, frameId) {
+  try { await browser.scripting.removeCSS({ target: cssTarget(tabId, frameId), css, origin: 'USER' }); } catch {}
 }
 
 async function setBadge(tabId, enabled) {
@@ -66,6 +76,7 @@ async function broadcastReapply() {
 if (browser && browser.runtime && browser.runtime.onMessage) {
   browser.runtime.onMessage.addListener((msg, sender) => {
     const tabId = sender && sender.tab && sender.tab.id;
+    const frameId = sender && sender.frameId;
     switch (msg && msg.type) {
       case MSG.GET_SETTINGS:
         return getSettings();
@@ -74,9 +85,9 @@ if (browser && browser.runtime && browser.runtime.onMessage) {
       case MSG.FETCH_FONT:
         return fetchFontAsDataUrl(msg.url);
       case MSG.APPLY_CSS:
-        return applyCssToTab(tabId, msg.css);
+        return applyCssToTab(tabId, msg.css, frameId);
       case MSG.REMOVE_CSS:
-        return removeCssFromTab(tabId, msg.css);
+        return removeCssFromTab(tabId, msg.css, frameId);
       case MSG.TOGGLE_SITE:
         return toggleSite(msg.url || (sender.tab && sender.tab.url)).then(async (s) => { await broadcastReapply(); return s; });
       default:
