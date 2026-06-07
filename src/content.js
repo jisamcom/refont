@@ -199,6 +199,27 @@ async function injectWebFont() {
     } catch { return; }
   }
   (document.head || document.documentElement).appendChild(style);
+  warmFonts();
+}
+
+// CSS Font Loading API: proactively trigger a download of the chosen families so
+// the swap happens as soon as possible instead of lazily on first paint of a
+// matching glyph. This is purely a fetch hint — the actual application is still
+// the CSS-variable engine — so it never forces layout or blocks. Most useful for
+// the @import/CSS web-font path (whose font isn't inlined). No-op where the API
+// or the family is absent. (document.fonts.ready, used by the popup, is the
+// matching post-layout readback; here we only kick off loads.)
+function warmFonts() {
+  try {
+    if (!settings || !document.fonts || !document.fonts.load) return;
+    const names = [];
+    if (settings.bodyFont && settings.bodyFont.name) names.push(settings.bodyFont.name);
+    if (settings.codeFont && settings.codeFont.name) names.push(settings.codeFont.name);
+    for (const n of names) {
+      const fam = sanitizeFamilyName(n);
+      if (fam) document.fonts.load(`1em "${fam}"`).catch(() => {});
+    }
+  } catch {}
 }
 
 // Untag every element. Because we only ever set Refont attributes + the
@@ -290,7 +311,8 @@ function applyFull(next) {
   // --- fast path (synchronous): the rule sheet, the variables and the first
   // tagged elements land before the browser paints — no flash of the original. ---
   injectStaticStyle(appliedCss);
-  injectWebFont().catch(() => {}); // @import/@font-face style appends synchronously
+  injectWebFont().catch(() => {}); // @import/@font-face style appends synchronously (warms its own font)
+  warmFonts();                     // system-font path: kick off the load too
   startObserver();                 // catches nodes as the parser streams them in
   profile('full-scan', null, function scanInitial() { scan(document.documentElement); });
 
@@ -309,6 +331,7 @@ function applyFull(next) {
 function applyValues(next) {
   settings = next;
   setVars(settings);
+  warmFonts();
   const css = buildSheet(settings);
   if (css !== appliedCss) {
     injectStaticStyle(css);

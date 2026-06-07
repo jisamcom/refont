@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Refont",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Replace page fonts everywhere except functional fonts (icons, math, barcode, ...).",
   "permissions": ["storage", "scripting", "tabs"],
   "host_permissions": ["<all_urls>"],
