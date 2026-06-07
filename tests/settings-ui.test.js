@@ -33,6 +33,11 @@ describe('settingsToState / stateToSettings', () => {
     expect(back.width).toBe(90);
     expect(back.opticalSizing).toBe('none');
   });
+  it('round-trips wordSpacing', () => {
+    const st = settingsToState({ ...DEFAULTS, wordSpacing: 2 });
+    expect(st.wordSpacing).toBe(2);
+    expect(stateToSettings(st).wordSpacing).toBe(2);
+  });
 });
 
 describe('previewSize', () => {
@@ -64,6 +69,19 @@ describe('live preview wiring', () => {
     const rScale = root.querySelector('#rScale');
     rScale.value = '2'; rScale.dispatchEvent(new Event('input'));
     expect(parseFloat(root.querySelector('#sEn').style.fontSize)).toBeGreaterThan(20);
+  });
+
+  it('the accessibility preset bumps min-size/line-height/letter+word-spacing in one click', () => {
+    const root = document.createElement('div');
+    const api = mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1, settings: { ...DEFAULTS } });
+    root.querySelector('#presetA11y').click();
+    expect(api.state.minSize).toBe(18);
+    expect(api.state.lineHeight).toBe(1.7);
+    expect(api.state.letterSpacing).toBe(0.5);
+    expect(api.state.wordSpacing).toBe(1.5);
+    // chips + specimen reflect it
+    expect(root.querySelector('#vMin').textContent).toBe('18px');
+    expect(root.querySelector('#sKr').style.wordSpacing).toBe('1.5px');
   });
 
   it('drives specimen font-stretch from the width dial and font-optical-sizing from the toggle', () => {

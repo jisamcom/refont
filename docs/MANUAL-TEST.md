@@ -27,7 +27,8 @@
 - [ ] Code blocks use the code font when set (GitHub / MDN)
 - [ ] scale (1.2) enlarges text proportionally; minSize floors tiny text
 - [ ] weight + preserveBold: body lightens but headings stay bold
-- [ ] line-height / letter-spacing apply when set
+- [ ] line-height / letter-spacing / word-spacing apply when set (word-spacing helps Korean 어절 separation; verify on a Korean article)
+- [ ] **읽기 좋게 (접근성) preset:** clicking it bumps min-size + line-height + letter/word-spacing to readable values in one go; the specimen + page reflect it; works on Korean text regardless of the chosen font
 - [ ] Blocklist: add docs.google.com/spreadsheets → Sheets unaffected
 - [ ] Popup toggle disables/enables current site instantly
 - [ ] Keyboard shortcut Alt+Shift+F toggles current site
@@ -37,6 +38,20 @@
 - [ ] SPA (e.g. YouTube/Twitter) — new content gets the font as you scroll
 - [ ] **Iframe content (regression fix):** Naver Cafe article page (`cafe.naver.com/.../articles/...`, body renders in `<iframe id="cafe_main">`) — article text, nicknames, and comments all get the chosen font, not just the outer shell. Spot-check another iframe-bodied site (e.g. an embedded forum / docs widget).
 - [ ] **No flash of original font (FOUC):** hard-reload a heavy site (cold service worker) — text should appear directly in the chosen font without a visible swap/flicker from the original. Compare a normal site and an iframe site.
+
+## Cross-browser cascade parity (Firefox user-origin !important)
+> Refont's font/size overrides ride a **user-origin `!important`** stylesheet (via `scripting.insertCSS({origin:'USER'})`). Per CSS Cascade, user-`!important` beats author-`!important`; MDN states Firefox's `origin:'USER'` injects at the real user origin and the Chrome mis-filing bug (w3c/webextensions#906) is Chrome-only ("Firefox behaves correctly"). This is the 5-minute empirical confirmation of that docs-based claim.
+
+1. `npm run build:firefox` → load `dist/firefox` as a temporary add-on.
+2. Open a page whose CSS forces body text with author `!important`, e.g. a quick local file:
+   ```html
+   <style>p{font-family:"Times New Roman" !important; font-size:11px !important;}</style>
+   <p>가나다 ABC 0123 — author forced this with !important</p>
+   ```
+3. Set Refont body font to a clearly different font (e.g. Pretendard / Nanum Gothic) and a min-size (e.g. 18px), Save.
+- [ ] **Firefox:** the paragraph shows Refont's font and ≥18px — i.e. Refont's USER `!important` **beats** the page's author `!important` (not stuck on 11px Times).
+- [ ] **Chrome:** same page → same win (sanity that both browsers behave for our USER-origin path).
+- [ ] Spot-check on a real site that pins body `font-family !important` (some news/editorial themes) in Firefox.
 
 ## Redesigned UI (shared popup + options component)
 > **Test gotcha:** a *loaded* Refont overrides inline fonts on `<all_urls>` pages, so any standalone preview/mockup page may look "stuck" on one font. The real popup/options run on `chrome-extension://` pages and are NOT affected. If something looks wrong, re-check with Refont disabled or in an incognito window.

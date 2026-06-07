@@ -118,6 +118,9 @@ export function buildDynamicCss(settings) {
   if (s.letterSpacing && s.letterSpacing !== 0) {
     rules.push(`[data-fc]:not([data-fc-code]){letter-spacing:${s.letterSpacing}px !important;}`);
   }
+  if (s.wordSpacing && s.wordSpacing > 0) {
+    rules.push(`[data-fc]:not([data-fc-code]){word-spacing:${s.wordSpacing}px !important;}`);
+  }
   // Width dial → font-stretch via a variable (cheap to drag, like weight).
   if ((s.width || 0) > 0) {
     rules.push('[data-fc]:not([data-fc-code]){font-stretch:var(--refont-width) !important;}');

@@ -17,6 +17,7 @@ export const DEFAULTS = {
   preserveBold: true,
   lineHeight: 0,
   letterSpacing: 0,
+  wordSpacing: 0,    // px; 0 = off (WCAG 1.4.12 text-spacing helper)
   axes: '',          // raw variable-axis string, e.g. "opsz 14, wdth 80"
   weightFine: false, // weight slider continuous (variable) vs 100-step
   blocklist: [],

@@ -18,6 +18,7 @@ export function settingsToState(s) {
     urlType: bf.urlType || 'css',
     webfontDisplay: s.webfontDisplay || 'swap',
     scale: s.scale, minSize: s.minSize, lineHeight: s.lineHeight, letterSpacing: s.letterSpacing,
+    wordSpacing: s.wordSpacing || 0,
     weight: s.weight, weightFine: !!s.weightFine, preserveBold: s.preserveBold !== false, axes: s.axes || '',
     width: s.width || 0, opticalSizing: s.opticalSizing || 'auto',
     codeEnabled: !!(s.codeFont && s.codeFont.name),
@@ -40,7 +41,8 @@ export function stateToSettings(st) {
     codeFont: st.codeEnabled && st.codeFamily ? { source: 'system', name: st.codeFamily, url: null, urlType: 'css' } : null,
     scale: st.scale, minSize: st.minSize, weight: st.weight, weightFine: st.weightFine,
     width: st.width, opticalSizing: st.opticalSizing,
-    preserveBold: st.preserveBold, lineHeight: st.lineHeight, letterSpacing: st.letterSpacing, axes: st.axes,
+    preserveBold: st.preserveBold, lineHeight: st.lineHeight, letterSpacing: st.letterSpacing,
+    wordSpacing: st.wordSpacing, axes: st.axes,
     blocklist: st.blocklist, protectionDenylistExtra: st.protectExtra,
     manualExclusions: st.manualExclusions, recentFonts: st.recentFonts,
   };
@@ -56,7 +58,7 @@ const MARKUP = `<div class="popup" id="popup">
     <!-- ===== sticky top ===== -->
     <div class="top">
       <div class="brandrow">
-        <div class="brand"><span class="mark">Refont<span class="dot">.</span></span><span class="ver">v0.2</span></div>
+        <div class="brand"><span class="mark">Refont<span class="dot">.</span></span><span class="ver">v0.2.1</span></div>
         <div class="toggle on" id="toggle" role="switch" aria-checked="true" tabindex="0">
           <span class="lbl" id="toggleLbl">이 사이트 켜짐</span>
           <span class="switch"></span>
@@ -106,6 +108,7 @@ const MARKUP = `<div class="popup" id="popup">
       <!-- SIZE & RHYTHM -->
       <section>
         <div class="sec-h"><span class="t">Size &amp; rhythm</span><span class="rule"></span></div>
+        <div class="minirow"><button class="btn-add" id="presetA11y" type="button">읽기 좋게 (접근성)</button><span class="hint" style="font-size:11px;color:var(--ink-dim)">최소 크기·줄간격·자간을 한 번에 (한글 포함)</span></div>
 
         <div class="ctl">
           <div class="row"><span class="name">크기 배율</span><span class="val" id="vScale">1.10×</span></div>
@@ -122,6 +125,10 @@ const MARKUP = `<div class="popup" id="popup">
         <div class="ctl">
           <div class="row"><span class="name">자간</span><span class="val" id="vLs">0.0px</span></div>
           <input type="range" id="rLs" min="-1" max="4" step="0.1" value="0" />
+        </div>
+        <div class="ctl">
+          <div class="row"><span class="name">어절 간격</span><span class="val off" id="vWs">끔</span></div>
+          <input type="range" id="rWs" min="0" max="8" step="0.5" value="0" />
         </div>
       </section>
 
@@ -233,6 +240,7 @@ export function mountSettingsUI(root, ctx) {
     const fam = "'" + state.family + "', system-ui, sans-serif";
     const w = String(state.weight || 400);
     const ls = state.letterSpacing ? state.letterSpacing + 'px' : '';
+    const ws = state.wordSpacing > 0 ? state.wordSpacing + 'px' : '';
     const lh = state.lineHeight > 0 ? state.lineHeight : '';
     // Mirror the engine's split: registered axes → standard props, custom → FVS.
     const { std, custom } = splitTextAxes(state);
@@ -248,6 +256,7 @@ export function mountSettingsUI(root, ctx) {
       el.style.fontStyle = fstyle;
       el.style.fontOpticalSizing = optical;
       el.style.letterSpacing = ls;
+      el.style.wordSpacing = ws;
       el.style.lineHeight = lh;
       el.style.fontVariationSettings = fvsStr;
     }
@@ -272,6 +281,7 @@ export function mountSettingsUI(root, ctx) {
     if (state.minSize > 0) parts.push({ t: 'min ' + state.minSize + 'px' });
     if (state.lineHeight > 0) parts.push({ t: 'lh ' + state.lineHeight.toFixed(2) });
     if (state.letterSpacing != 0) parts.push({ t: 'ls ' + state.letterSpacing.toFixed(1) });
+    if (state.wordSpacing > 0) parts.push({ t: 'ws ' + state.wordSpacing.toFixed(1) });
     parseAxes(state.axes).forEach((a) => parts.push({ t: a.tag + ' ' + a.val }));
     r.replaceChildren();
     parts.forEach((p, i) => {
@@ -291,7 +301,7 @@ export function mountSettingsUI(root, ctx) {
     el.addEventListener('input', () => { setP(el); fn(); applyPreview(); });
   }
 
-  const rScale = $('rScale'), rMin = $('rMin'), rLh = $('rLh'), rLs = $('rLs'), rWeight = $('rWeight'), rWidth = $('rWidth');
+  const rScale = $('rScale'), rMin = $('rMin'), rLh = $('rLh'), rLs = $('rLs'), rWs = $('rWs'), rWeight = $('rWeight'), rWidth = $('rWidth');
 
   // Named updaters so the value chips can also be synced on load (not just on input).
   const updScale = () => { state.scale = +rScale.value; $('vScale').textContent = state.scale.toFixed(2) + '×'; };
@@ -308,14 +318,31 @@ export function mountSettingsUI(root, ctx) {
     else { v.textContent = state.lineHeight.toFixed(2); v.classList.remove('off'); }
   };
   const updLs = () => { state.letterSpacing = +rLs.value; $('vLs').textContent = state.letterSpacing.toFixed(1) + 'px'; };
+  const updWs = () => {
+    state.wordSpacing = +rWs.value;
+    const v = $('vWs');
+    if (state.wordSpacing === 0) { v.textContent = '끔'; v.classList.add('off'); }
+    else { v.textContent = state.wordSpacing.toFixed(1) + 'px'; v.classList.remove('off'); }
+  };
   const updWeight = () => { state.weight = +rWeight.value; $('vWeight').textContent = state.weight; markTicks(); };
   const updWidth = () => { state.width = +rWidth.value; const v = $('vWidth'); v.textContent = state.width + '%'; v.classList.remove('off'); };
   wire(rScale, updScale);
   wire(rMin, updMin);
   wire(rLh, updLh);
   wire(rLs, updLs);
+  wire(rWs, updWs);
   wire(rWeight, updWeight);
   wire(rWidth, updWidth);
+
+  // ---- accessibility / reading preset: bump readability dials in one click.
+  // Font-agnostic (works on Korean too); does NOT touch family/color.
+  $('presetA11y').addEventListener('click', () => {
+    rMin.value = 18; updMin(); setP(rMin);
+    rLh.value = 1.7; updLh(); setP(rLh);
+    rLs.value = 0.5; updLs(); setP(rLs);
+    rWs.value = 1.5; updWs(); setP(rWs);
+    applyPreview();
+  });
 
   // ---- weight ticks ----
   const ticksWrap = $('ticks');
@@ -361,6 +388,7 @@ export function mountSettingsUI(root, ctx) {
   rMin.value = state.minSize;
   rLh.value = state.lineHeight;
   rLs.value = state.letterSpacing;
+  rWs.value = state.wordSpacing;
   // weight:0 (원본/keep) → position slider at 400 but keep state.weight at 0 for saving.
   rWeight.value = state.weight || 400;
   rWeight.step = state.weightFine ? 1 : 100;
@@ -372,7 +400,7 @@ export function mountSettingsUI(root, ctx) {
   else { vWidth.textContent = state.width + '%'; vWidth.classList.remove('off'); }
   $('axes').value = state.axes;
   // Sync the size/rhythm value chips to the loaded settings (weight chip handled above).
-  updScale(); updMin(); updLh(); updLs();
+  updScale(); updMin(); updLh(); updLs(); updWs();
 
   // sync check controls to state (markup defaults: ckPreserve on, ckFine off).
   const ckPreserve = $('ckPreserve');
@@ -386,7 +414,7 @@ export function mountSettingsUI(root, ctx) {
   ckOptical.setAttribute('aria-checked', String(opticalOn));
   ckOptical.classList.toggle('on', opticalOn);
 
-  [rScale, rMin, rLh, rLs, rWeight, rWidth].forEach(setP);
+  [rScale, rMin, rLh, rLs, rWs, rWeight, rWidth].forEach(setP);
   markTicks();
   applyPreview();
 
