@@ -40,16 +40,18 @@ function pseudoFamily(el, which) {
   try { return getComputedStyle(el, which).fontFamily; } catch { return ''; }
 }
 
-// Tag an element so the stylesheet engine styles it. We only ever set Refont's
-// own attributes and the --fc-base-size custom property — the author's inline
-// font-size/font-weight are never touched, so removing our attributes restores
-// the page losslessly. An already-tagged element is skipped (idempotent).
-function processElement(el) {
-  if (!el || el.nodeType !== 1 || SKIP_TAGS.has(el.tagName)) return;
-  if (el.hasAttribute('data-fc')) return;
+// READ + DECIDE only (no DOM writes). Returns a tag plan or null to skip.
+// Keeping all getComputedStyle reads in a write-free pass avoids layout
+// thrashing (a write between reads forces a synchronous reflow on the next
+// read). It also means every element is classified against the page's ORIGINAL
+// computed style — tagging a parent can't perturb a child's read, since no
+// tagging happens until the write pass.
+function classifyElement(el) {
+  if (!el || el.nodeType !== 1 || SKIP_TAGS.has(el.tagName)) return null;
+  if (el.hasAttribute('data-fc')) return null;
   if (PROFILE) profVisited += 1;
   const text = directText(el);
-  if (!text || !text.trim()) return; // only opt-in elements that hold real text
+  if (!text || !text.trim()) return null; // only opt-in elements that hold real text
 
   const cs = getComputedStyle(el);
   const fontFamily = cs.fontFamily;
@@ -59,20 +61,27 @@ function processElement(el) {
     : '';
   const info = { fontFamily, pseudoFontFamily, className, text };
   const extra = settings.protectionDenylistExtra || [];
-  if (shouldProtect(info, extra) || matchesManualExclusion(el)) return;
+  if (shouldProtect(info, extra) || matchesManualExclusion(el)) return null;
 
   const isCode = isCodeElement(el, fontFamily);
   const useCode = settings.codeFont && settings.codeFont.name;
-  if (isCode && !useCode) return; // no code font set → leave code untouched
-
-  el.setAttribute('data-fc', '');
-  if (PROFILE) profTagged += 1;
-  if (isCode) el.setAttribute('data-fc-code', '');
+  if (isCode && !useCode) return null; // no code font set → leave code untouched
 
   const { sizePx, weightBucket } = elementBase({
     fontSize: parseFloat(cs.fontSize) || 0,
     fontWeight: parseInt(cs.fontWeight, 10) || 400,
   });
+  return { el, isCode, sizePx, weightBucket };
+}
+
+// WRITE only. We only ever set Refont's own attributes and the --fc-base-size
+// custom property — the author's inline font-size/font-weight are never touched,
+// so removing our attributes restores the page losslessly.
+function tagElement(plan) {
+  const { el, isCode, sizePx, weightBucket } = plan;
+  el.setAttribute('data-fc', '');
+  if (PROFILE) profTagged += 1;
+  if (isCode) el.setAttribute('data-fc-code', '');
   if (sizePx > 0) {
     el.style.setProperty('--fc-base-size', `${sizePx}px`);
     el.setAttribute('data-fc-size', '');
@@ -93,10 +102,16 @@ function matchesManualExclusion(el) {
 function scan(root) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
   let node = walker.currentNode.nodeType === 1 ? walker.currentNode : walker.nextNode();
+  // Pass 1 — read + decide (no writes ⇒ at most one forced reflow for the whole
+  // subtree instead of one per element).
+  const plans = [];
   while (node) {
-    processElement(node);
+    const plan = classifyElement(node);
+    if (plan) plans.push(plan);
     node = walker.nextNode();
   }
+  // Pass 2 — write only (no reads ⇒ nothing forces a reflow mid-loop).
+  for (const plan of plans) tagElement(plan);
 }
 
 function collectPageFonts() {

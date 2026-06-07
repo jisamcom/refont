@@ -125,4 +125,15 @@ describe('content var-engine', () => {
     expect(ic.hasAttribute('data-fc')).toBe(false);
     expect(ic.style.getPropertyValue('font-size')).toBe('12px');
   });
+
+  it('tags nested eligible elements (two-pass read-then-write covers the whole subtree)', async () => {
+    document.body.innerHTML = '<div id="o" style="font-size:16px">outer <span id="i" style="font-size:12px">inner</span></div>';
+    await freshApply(makeSettings({ scale: 2 }));
+    // Both the parent (direct text "outer ") and the child are tagged from their
+    // own original base — the write pass doesn't perturb the read pass.
+    expect(document.getElementById('o').getAttribute('data-fc')).toBe('');
+    expect(document.getElementById('o').style.getPropertyValue('--fc-base-size')).toBe('16px');
+    expect(document.getElementById('i').getAttribute('data-fc')).toBe('');
+    expect(document.getElementById('i').style.getPropertyValue('--fc-base-size')).toBe('12px');
+  });
 });
