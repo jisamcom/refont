@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Refont",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Replace page fonts everywhere except functional fonts (icons, math, barcode, ...).",
   "permissions": ["storage", "scripting", "tabs"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
-    { "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_start", "all_frames": true }
+    { "matches": ["<all_urls>"], "js": ["content.js"], "css": ["refont-bootstrap.css"], "run_at": "document_start", "all_frames": true }
   ],
   "action": { "default_popup": "popup.html", "default_title": "Refont" },
   "options_ui": { "page": "options.html", "open_in_tab": true },

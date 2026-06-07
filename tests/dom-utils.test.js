@@ -1,6 +1,6 @@
 // tests/dom-utils.test.js
 import { describe, it, expect } from 'vitest';
-import { directText, isCodeElement } from '../src/lib/dom-utils.js';
+import { directText, isCodeElement, dedupeRoots } from '../src/lib/dom-utils.js';
 
 function el(html) {
   const d = document.createElement('div');
@@ -29,5 +29,20 @@ describe('isCodeElement', () => {
   });
   it('false for normal element + family', () => {
     expect(isCodeElement(el('<span>x</span>'), 'Arial')).toBe(false);
+  });
+});
+
+describe('dedupeRoots', () => {
+  it('drops nodes contained by another queued node', () => {
+    const root = el('<div><section><p>hi</p></section></div>');
+    const section = root.firstElementChild;
+    const p = section.firstElementChild;
+    // Queueing root, section and p should collapse to just [root].
+    expect(dedupeRoots([root, section, p])).toEqual([root]);
+  });
+  it('keeps independent sibling subtrees', () => {
+    const wrap = el('<div><a>1</a><b>2</b></div>');
+    const a = wrap.children[0]; const b = wrap.children[1];
+    expect(dedupeRoots([a, b])).toEqual([a, b]);
   });
 });

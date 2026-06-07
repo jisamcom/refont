@@ -20,13 +20,39 @@ export const FONT_KO_NAMES = {
   'Gowun Dodum': '고운돋움',
 };
 
+// Alias family names that resolve to the same physical font as a canonical
+// family. Korean Windows exposes e.g. both "Malgun Gothic" and "맑은 고딕", so
+// detection finds both — we collapse them to one picker row. (Detection keeps
+// both names on purpose, for systems that expose only the localized name.)
+export const FONT_ALIASES = {
+  '맑은 고딕': 'Malgun Gothic',
+  '굴림': 'Gulim',
+  '바탕': 'Batang',
+  '돋움': 'Dotum',
+  '궁서': 'Gungsuh',
+  '나눔고딕': 'Nanum Gothic',
+  'Apple SD 산돌고딕 Neo': 'Apple SD Gothic Neo',
+};
+
 // Display label: Korean name if known, else family; always strip " Variable".
 export function labelOf(family) {
   const f = String(family || '');
   return (FONT_KO_NAMES[f] || f).replace(' Variable', '');
 }
 
-// Map a family-name array to picker option objects ({f} or {f, ko}).
+// Map a family-name array to picker option objects ({f} or {f, ko}), de-duped by
+// what the user actually sees. Two entries collapse when they share a display
+// label after alias resolution (맑은 고딕 ≡ Malgun Gothic) or " Variable"
+// stripping (Pretendard ≡ Pretendard Variable). The first detected name wins, so
+// the canonical/base form (listed first in the candidates) is what gets applied.
 export function toOptions(families) {
-  return (families || []).map((f) => (FONT_KO_NAMES[f] ? { f, ko: FONT_KO_NAMES[f] } : { f }));
+  const seen = new Set();
+  const out = [];
+  for (const f of families || []) {
+    const key = labelOf(FONT_ALIASES[f] || f);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(FONT_KO_NAMES[f] ? { f, ko: FONT_KO_NAMES[f] } : { f });
+  }
+  return out;
 }

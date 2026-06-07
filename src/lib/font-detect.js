@@ -6,7 +6,9 @@ export const FONT_CANDIDATES = [
   // Korean (Windows/macOS common)
   'Malgun Gothic', '맑은 고딕', 'Gulim', '굴림', 'Batang', '바탕', 'Dotum', '돋움',
   'Nanum Gothic', '나눔고딕', 'Nanum Myeongjo', 'NanumSquare', 'Nanum Barun Gothic',
-  'Pretendard', 'Pretendard Variable', 'Spoqa Han Sans Neo', 'Noto Sans KR', 'Noto Serif KR',
+  // Variable before static so the variable build (used by the default + the
+  // weight/axes feature) is the one kept when both resolve to the same font.
+  'Pretendard Variable', 'Pretendard', 'Spoqa Han Sans Neo', 'Noto Sans KR', 'Noto Serif KR',
   'Apple SD Gothic Neo', 'AppleGothic', 'Apple SD 산돌고딕 Neo', 'Spoqa Han Sans',
   // Latin (common)
   'Arial', 'Helvetica', 'Helvetica Neue', 'Times New Roman', 'Georgia', 'Verdana',

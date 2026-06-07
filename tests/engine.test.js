@@ -1,6 +1,9 @@
 // tests/engine.test.js
 import { describe, it, expect } from 'vitest';
-import { sanitizeFamilyName, fontStack, buildCss, computeElementInline, parseAxes } from '../src/lib/engine.js';
+import {
+  sanitizeFamilyName, fontStack, parseAxes,
+  buildSkeletonCss, buildDynamicCss, engineVars, elementBase,
+} from '../src/lib/engine.js';
 
 describe('sanitizeFamilyName', () => {
   it('strips double-quote, backslash, semicolon, braces, and angle brackets', () => {
@@ -38,42 +41,90 @@ describe('fontStack', () => {
   });
 });
 
-describe('buildCss', () => {
-  it('emits a [data-fc] body rule with !important', () => {
-    const css = buildCss({ bodyFont: { name: 'Pretendard' } });
-    expect(css).toMatch(/\[data-fc\]\s*\{[^}]*font-family:[^}]*!important/);
+describe('buildSkeletonCss', () => {
+  const css = buildSkeletonCss();
+  it('drives font-family from the body-stack variable with !important', () => {
+    expect(css).toMatch(/\[data-fc\]\{font-family:var\(--refont-body-stack\) !important;\}/);
   });
-  it('emits a [data-fc-code] rule only when codeFont set', () => {
-    expect(buildCss({ bodyFont: { name: 'A' }, codeFont: null })).not.toContain('data-fc-code');
-    expect(buildCss({ bodyFont: { name: 'A' }, codeFont: { name: 'D2Coding' } })).toContain('[data-fc-code]');
+  it('does NOT pin font-size (that is gated in the dynamic sheet)', () => {
+    expect(css).not.toContain('font-size');
   });
-  it('emits line-height / letter-spacing only when nonzero', () => {
-    expect(buildCss({ bodyFont: { name: 'A' }, lineHeight: 0, letterSpacing: 0 })).not.toContain('line-height');
-    const css = buildCss({ bodyFont: { name: 'A' }, lineHeight: 1.6, letterSpacing: 0.5 });
-    expect(css).toContain('line-height:1.6');
-    expect(css).toContain('letter-spacing:0.5px');
+  it('is constant (no settings input) so it is never rebuilt', () => {
+    expect(buildSkeletonCss()).toBe(css);
   });
 });
 
-describe('computeElementInline', () => {
-  it('scales font-size by the multiplier', () => {
-    expect(computeElementInline({ fontSize: 16, fontWeight: 400 }, { scale: 1.5 }).fontSize).toBe('24px');
+describe('buildDynamicCss size gating', () => {
+  it('omits the font-size rule when sizing is off (scale 1, min 0) — keeps fluid text', () => {
+    expect(buildDynamicCss({ scale: 1, minSize: 0 })).not.toContain('font-size');
   });
-  it('applies the minimum-size floor', () => {
-    expect(computeElementInline({ fontSize: 10, fontWeight: 400 }, { scale: 1, minSize: 14 }).fontSize).toBe('14px');
+  it('emits the scale rule when scale != 1', () => {
+    expect(buildDynamicCss({ scale: 1.2, minSize: 0 }))
+      .toContain('[data-fc-size]{font-size:max(calc(var(--fc-base-size) * var(--refont-scale,1)), var(--refont-min,0px)) !important;}');
   });
-  it('returns no fontSize when unchanged', () => {
-    expect(computeElementInline({ fontSize: 16, fontWeight: 400 }, { scale: 1, minSize: 0 }).fontSize).toBeUndefined();
+  it('emits the rule when a min floor is set even at scale 1', () => {
+    expect(buildDynamicCss({ scale: 1, minSize: 14 })).toContain('[data-fc-size]');
   });
-  it('sets weight only on normal-weight elements when preserveBold', () => {
-    expect(computeElementInline({ fontSize: 16, fontWeight: 400 }, { weight: 300, preserveBold: true }).fontWeight).toBe('300');
-    expect(computeElementInline({ fontSize: 16, fontWeight: 700 }, { weight: 300, preserveBold: true }).fontWeight).toBeUndefined();
+  it('is identical for different scale *values* (value lives in the variable)', () => {
+    expect(buildDynamicCss({ scale: 1.2 })).toBe(buildDynamicCss({ scale: 1.9 }));
   });
-  it('sets weight on all elements when preserveBold false', () => {
-    expect(computeElementInline({ fontSize: 16, fontWeight: 700 }, { weight: 300, preserveBold: false }).fontWeight).toBe('300');
+});
+
+describe('buildDynamicCss', () => {
+  it('emits no weight rule when weight is 0 (keep original)', () => {
+    expect(buildDynamicCss({ weight: 0 })).not.toContain('font-weight');
   });
-  it('never sets weight when weight is 0', () => {
-    expect(computeElementInline({ fontSize: 16, fontWeight: 400 }, { weight: 0 }).fontWeight).toBeUndefined();
+  it('weights only light elements when preserveBold, both when not', () => {
+    const keep = buildDynamicCss({ weight: 700, preserveBold: true });
+    expect(keep).toContain('[data-fc-wlight]{font-weight:var(--refont-weight) !important;}');
+    expect(keep).not.toContain('[data-fc-wbold]');
+    const all = buildDynamicCss({ weight: 700, preserveBold: false });
+    expect(all).toContain('[data-fc-wlight]');
+    expect(all).toContain('[data-fc-wbold]{font-weight:var(--refont-weight) !important;}');
+  });
+  it('is identical for different weight *values* (value lives in the variable)', () => {
+    expect(buildDynamicCss({ weight: 300, preserveBold: true })).toBe(buildDynamicCss({ weight: 900, preserveBold: true }));
+  });
+  it('emits line-height / letter-spacing only when nonzero, skipping code', () => {
+    expect(buildDynamicCss({ lineHeight: 0, letterSpacing: 0 })).toBe('');
+    const css = buildDynamicCss({ lineHeight: 1.6, letterSpacing: 0.5 });
+    expect(css).toContain('[data-fc]:not([data-fc-code]){line-height:1.6 !important;}');
+    expect(css).toContain('letter-spacing:0.5px');
+  });
+  it('emits parsed axes (non-code) when present', () => {
+    expect(buildDynamicCss({ axes: '' })).not.toContain('font-variation-settings');
+    expect(buildDynamicCss({ axes: 'opsz 14, wdth 80' }))
+      .toContain("[data-fc]:not([data-fc-code]){font-variation-settings:'opsz' 14,'wdth' 80 !important;}");
+  });
+});
+
+describe('engineVars', () => {
+  it('maps scale/min and the font stacks to variables', () => {
+    const v = engineVars({ bodyFont: { name: 'Pretendard' }, scale: 1.2, minSize: 14 });
+    expect(v['--refont-scale']).toBe('1.2');
+    expect(v['--refont-min']).toBe('14px');
+    expect(v['--refont-body-stack'].startsWith('"Pretendard"')).toBe(true);
+  });
+  it('omits --refont-weight when weight is 0, includes it otherwise', () => {
+    expect('--refont-weight' in engineVars({ weight: 0 })).toBe(false);
+    expect(engineVars({ weight: 600 })['--refont-weight']).toBe('600');
+  });
+  it('defaults scale to 1 and min to 0px', () => {
+    const v = engineVars({});
+    expect(v['--refont-scale']).toBe('1');
+    expect(v['--refont-min']).toBe('0px');
+  });
+});
+
+describe('elementBase', () => {
+  it('reports a positive size and a light bucket for normal weight', () => {
+    expect(elementBase({ fontSize: 16, fontWeight: 400 })).toEqual({ sizePx: 16, weightBucket: 'light' });
+  });
+  it('buckets weight > 400 as bold', () => {
+    expect(elementBase({ fontSize: 16, fontWeight: 700 }).weightBucket).toBe('bold');
+  });
+  it('reports sizePx 0 when there is no usable size', () => {
+    expect(elementBase({ fontSize: 0, fontWeight: 400 }).sizePx).toBe(0);
   });
 });
 
@@ -92,15 +143,5 @@ describe('parseAxes', () => {
     expect(parseAxes('opsz, wdth 80, , junk')).toEqual([{ tag: 'wdth', val: '80' }]);
     expect(parseAxes('')).toEqual([]);
     expect(parseAxes(undefined)).toEqual([]);
-  });
-});
-
-describe('buildCss font-variation-settings', () => {
-  it('omits the rule when no axes', () => {
-    expect(buildCss({ bodyFont: { name: 'A' }, axes: '' })).not.toContain('font-variation-settings');
-  });
-  it('emits parsed axes with !important when present', () => {
-    const css = buildCss({ bodyFont: { name: 'A' }, axes: 'opsz 14, wdth 80' });
-    expect(css).toMatch(/\[data-fc\]\{font-variation-settings:'opsz' 14,'wdth' 80 !important;\}/);
   });
 });

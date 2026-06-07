@@ -42,4 +42,28 @@ describe('makeFontPicker', () => {
     search.value = 'geo'; search.dispatchEvent(new Event('input'));
     expect(mount.querySelectorAll('.fp-group').length).toBe(0);
   });
+
+  it('does not inject markup from a malicious family name (imported/custom)', () => {
+    const evil = 'x"><img src=q onerror="window.__pwned=1">';
+    const mount = document.createElement('div');
+    // A crafted family can arrive as the current value (e.g. from imported settings).
+    makeFontPicker(mount, { fonts: [{ f: evil }], value: evil });
+    mount.querySelector('.fp-btn').click();
+    // No element node smuggled in via the family string.
+    expect(mount.querySelector('img')).toBe(null);
+    // The name is rendered verbatim as text, not parsed as HTML.
+    expect(mount.querySelector('.o-name').textContent).toBe(evil);
+  });
+
+  it('does not inject markup from a malicious custom-search entry', () => {
+    const evil = '"><img src=q onerror=1>';
+    const mount = document.createElement('div');
+    makeFontPicker(mount, { fonts: FONTS, value: 'Georgia' });
+    mount.querySelector('.fp-btn').click();
+    const search = mount.querySelector('.fp-search');
+    search.value = evil; search.dispatchEvent(new Event('input'));
+    expect(mount.querySelector('img')).toBe(null);
+    const mk = mount.querySelector('.fp-opt.mk .o-name');
+    expect(mk.textContent).toContain(evil);
+  });
 });

@@ -2,11 +2,14 @@
 import browser from 'webextension-polyfill';
 import { MSG } from './lib/messaging.js';
 import { isBlocked } from './lib/url-match.js';
-import { buildCss, computeElementInline, sanitizeFamilyName } from './lib/engine.js';
+import {
+  buildSkeletonCss, buildDynamicCss, engineVars, elementBase, ENGINE_VAR_NAMES, sanitizeFamilyName,
+} from './lib/engine.js';
 import { shouldProtect, hasIconClassHint, isProtectedFamily } from './lib/font-protection.js';
-import { directText, isCodeElement } from './lib/dom-utils.js';
+import { directText, isCodeElement, dedupeRoots } from './lib/dom-utils.js';
 import { dedupeClassify } from './lib/page-fonts.js';
 import { getSettings } from './lib/storage.js';
+import { needsFullRescan } from './lib/apply-plan.js';
 
 let settings = null;
 let observer = null;
@@ -14,12 +17,37 @@ let appliedCss = '';
 const STATIC_STYLE_ID = '__refont_style';
 const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'HEAD', 'META', 'LINK', 'TITLE']);
 
+// Opt-in profiling. Off by default with zero runtime cost; enable in a tab with
+//   localStorage.__refont_profile = '1'   (then reload)
+// to log initial-scan time, elements visited/tagged, and mutation-flush time —
+// the evidence needed before deciding whether the SHOW_ELEMENT scan is worth
+// reworking (e.g. to SHOW_TEXT). Read once at load so it can't throw mid-scan.
+const PROFILE = (() => { try { return !!localStorage.getItem('__refont_profile'); } catch { return false; } })();
+let profVisited = 0;
+let profTagged = 0;
+function profile(label, extra, fn) {
+  if (!PROFILE) return fn();
+  profVisited = 0; profTagged = 0;
+  const t0 = performance.now();
+  const r = fn();
+  const dt = performance.now() - t0;
+  // eslint-disable-next-line no-console
+  console.debug(`[refont:profile] ${label} ${dt.toFixed(1)}ms visited=${profVisited} tagged=${profTagged}${extra ? ` ${extra}` : ''}`);
+  return r;
+}
+
 function pseudoFamily(el, which) {
   try { return getComputedStyle(el, which).fontFamily; } catch { return ''; }
 }
 
+// Tag an element so the stylesheet engine styles it. We only ever set Refont's
+// own attributes and the --fc-base-size custom property — the author's inline
+// font-size/font-weight are never touched, so removing our attributes restores
+// the page losslessly. An already-tagged element is skipped (idempotent).
 function processElement(el) {
   if (!el || el.nodeType !== 1 || SKIP_TAGS.has(el.tagName)) return;
+  if (el.hasAttribute('data-fc')) return;
+  if (PROFILE) profVisited += 1;
   const text = directText(el);
   if (!text || !text.trim()) return; // only opt-in elements that hold real text
 
@@ -29,26 +57,27 @@ function processElement(el) {
   const pseudoFontFamily = hasIconClassHint(className)
     ? `${pseudoFamily(el, '::before')} ${pseudoFamily(el, '::after')}`
     : '';
-  const info = {
-    fontFamily,
-    pseudoFontFamily,
-    className,
-    text,
-  };
+  const info = { fontFamily, pseudoFontFamily, className, text };
   const extra = settings.protectionDenylistExtra || [];
   if (shouldProtect(info, extra) || matchesManualExclusion(el)) return;
 
   const isCode = isCodeElement(el, fontFamily);
   const useCode = settings.codeFont && settings.codeFont.name;
   if (isCode && !useCode) return; // no code font set → leave code untouched
-  el.setAttribute(isCode ? 'data-fc-code' : 'data-fc', '');
 
-  const inline = computeElementInline(
-    { fontSize: parseFloat(cs.fontSize) || 0, fontWeight: parseInt(cs.fontWeight, 10) || 400 },
-    settings,
-  );
-  if (inline.fontSize) el.style.setProperty('font-size', inline.fontSize, 'important');
-  if (inline.fontWeight) el.style.setProperty('font-weight', inline.fontWeight, 'important');
+  el.setAttribute('data-fc', '');
+  if (PROFILE) profTagged += 1;
+  if (isCode) el.setAttribute('data-fc-code', '');
+
+  const { sizePx, weightBucket } = elementBase({
+    fontSize: parseFloat(cs.fontSize) || 0,
+    fontWeight: parseInt(cs.fontWeight, 10) || 400,
+  });
+  if (sizePx > 0) {
+    el.style.setProperty('--fc-base-size', `${sizePx}px`);
+    el.setAttribute('data-fc-size', '');
+  }
+  el.setAttribute(weightBucket === 'light' ? 'data-fc-wlight' : 'data-fc-wbold', '');
 }
 
 function matchesManualExclusion(el) {
@@ -92,16 +121,41 @@ function collectPageFonts() {
   return dedupeClassify(raw, (name) => isProtectedFamily(name, extra), 40, exclude);
 }
 
+// ---- batched mutation handling ----
+// A churny SPA can fire a flood of mutations. Doing synchronous getComputedStyle
+// reads per record (the old behaviour) both burns time and pulls the content
+// script into the initiator stack of any resource the forced layout flushes
+// (e.g. a page's own lazy <img>). Coalesce a burst into one rAF flush instead.
+let pendingRoots = new Set();
+let flushScheduled = false;
+const schedule = (cb) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(cb) : setTimeout(cb, 16));
+
+function scheduleFlush() {
+  if (flushScheduled) return;
+  flushScheduled = true;
+  schedule(() => {
+    flushScheduled = false;
+    if (!observer) { pendingRoots.clear(); return; } // torn down before the flush ran
+    const roots = [...pendingRoots];
+    pendingRoots.clear();
+    const deduped = dedupeRoots(roots);
+    // Named (not an arrow) so it shows up distinctly in a stack trace — lets us
+    // tell which scan path is the initiator of any forced-layout resource load.
+    profile('mutation-flush', `roots=${roots.length}->${deduped.length}`, function scanMutations() {
+      for (const node of deduped) {
+        if (node.isConnected !== false) scan(node);
+      }
+    });
+  });
+}
+
 function startObserver() {
   observer = new MutationObserver((muts) => {
     for (const m of muts) {
-      for (const n of m.addedNodes) {
-        if (n.nodeType === 1) { scan(n); }
-      }
-      if (m.type === 'characterData' && m.target.parentElement) {
-        processElement(m.target.parentElement);
-      }
+      for (const n of m.addedNodes) if (n.nodeType === 1) pendingRoots.add(n);
+      if (m.type === 'characterData' && m.target.parentElement) pendingRoots.add(m.target.parentElement);
     }
+    if (pendingRoots.size) scheduleFlush();
   });
   observer.observe(document.documentElement, {
     childList: true, subtree: true, characterData: true,
@@ -130,19 +184,39 @@ async function injectWebFont() {
   (document.head || document.documentElement).appendChild(style);
 }
 
+// Untag every element. Because we only ever set Refont attributes + the
+// --fc-base-size custom property, this fully reverts the page — the author's own
+// inline font-size/font-weight were never modified.
 function clearMarks() {
-  for (const el of document.querySelectorAll('[data-fc],[data-fc-code]')) {
+  for (const el of document.querySelectorAll('[data-fc]')) {
     el.removeAttribute('data-fc');
     el.removeAttribute('data-fc-code');
-    el.style.removeProperty('font-size');
-    el.style.removeProperty('font-weight');
+    el.removeAttribute('data-fc-size');
+    el.removeAttribute('data-fc-wlight');
+    el.removeAttribute('data-fc-wbold');
+    el.style.removeProperty('--fc-base-size');
   }
 }
 
-// Inject the cascade rule synchronously, in-page, as an author stylesheet. This
-// is the anti-flash path: unlike the user-origin sheet (which travels async
-// through the service worker), this <style> exists before the browser's first
-// paint, so a tagged element is already styled the instant the parser emits it.
+// ---- engine variables (live values driven through CSS custom properties) ----
+function setVars(s) {
+  const root = document.documentElement;
+  const vars = engineVars(s);
+  for (const k of ENGINE_VAR_NAMES) {
+    if (k in vars) root.style.setProperty(k, vars[k]);
+    else root.style.removeProperty(k); // e.g. --refont-weight when weight is 0
+  }
+}
+
+function clearVars() {
+  const root = document.documentElement;
+  for (const k of ENGINE_VAR_NAMES) root.style.removeProperty(k);
+}
+
+// Inject the rule sheet synchronously, in-page, as an author stylesheet. This is
+// the anti-flash path: unlike the user-origin sheet (which travels async through
+// the service worker), this <style> exists before the browser's first paint, so
+// a tagged element is already styled the instant the parser emits it.
 function injectStaticStyle(css) {
   let style = document.getElementById(STATIC_STYLE_ID);
   if (!style) {
@@ -160,36 +234,77 @@ function removeStaticStyle() {
   if (style) style.remove();
 }
 
-// override: transient settings (live preview) that are applied but NOT persisted.
-// When omitted, settings are read straight from storage.local — no service-worker
-// wake-up — so the first paint isn't gated on a cold MV3 worker round-trip.
-async function apply(override) {
-  settings = override || await getSettings();
-  const active = settings.enabled && !isBlocked(location.href, settings.blocklist);
+// The full author/user-origin rule sheet for the current settings.
+function buildSheet(s) {
+  return `${buildSkeletonCss()}\n${buildDynamicCss(s)}`;
+}
 
-  // --- teardown any previous application ---
+// Tear down a previous application: stop the observer, untag elements, drop our
+// variables and stylesheets/web font.
+function teardown() {
   if (observer) { observer.disconnect(); observer = null; }
+  pendingRoots.clear();
+  flushScheduled = false;
   clearMarks();
+  clearVars();
   removeStaticStyle();
   if (appliedCss) { browser.runtime.sendMessage({ type: MSG.REMOVE_CSS, css: appliedCss }).catch(() => {}); appliedCss = ''; }
   const oldWebFont = document.getElementById('__refont_webfont'); if (oldWebFont) oldWebFont.remove();
+}
 
+// Full path: re-tag the document. Used on first run and whenever a change can
+// alter *which* elements get tagged (see needsFullRescan).
+function applyFull(next) {
+  settings = next;
+  const active = settings.enabled && !isBlocked(location.href, settings.blocklist);
+  teardown();
   if (!active) return;
 
-  appliedCss = buildCss(settings);
+  setVars(settings);
+  appliedCss = buildSheet(settings);
 
-  // --- fast path (synchronous): the cascade rule and the first tagged elements
-  // land before the browser paints, so there's no flash of the original font. ---
+  // --- fast path (synchronous): the rule sheet, the variables and the first
+  // tagged elements land before the browser paints — no flash of the original. ---
   injectStaticStyle(appliedCss);
   injectWebFont().catch(() => {}); // @import/@font-face style appends synchronously
   startObserver();                 // catches nodes as the parser streams them in
-  scan(document.documentElement);
+  profile('full-scan', null, function scanInitial() { scan(document.documentElement); });
 
   // --- reinforcement (async; does not gate first paint) ---
   // User-origin sheet: its !important outranks author !important on the rare page
   // that forces font-family on body text. The synchronous sheet above already
   // covers the common case instantly.
   browser.runtime.sendMessage({ type: MSG.APPLY_CSS, css: appliedCss }).catch(() => {});
+}
+
+// Cheap path: only style *values* changed (scale/weight/spacing/axes/family).
+// Re-set the variables (O(1)) and swap the rule sheet only if its *shape* changed
+// (weight on-off, preserveBold, line-height/letter-spacing/axes on-off). No DOM
+// walk, no getComputedStyle — this is what makes dragging a slider on a large
+// page cheap.
+function applyValues(next) {
+  settings = next;
+  setVars(settings);
+  const css = buildSheet(settings);
+  if (css !== appliedCss) {
+    injectStaticStyle(css);
+    const prev = appliedCss;
+    appliedCss = css;
+    browser.runtime.sendMessage({ type: MSG.APPLY_CSS, css }).catch(() => {});
+    if (prev) browser.runtime.sendMessage({ type: MSG.REMOVE_CSS, css: prev }).catch(() => {});
+  }
+}
+
+// override: transient settings (live preview) that are applied but NOT persisted.
+// When omitted, settings are read straight from storage.local — no service-worker
+// wake-up — so the first paint isn't gated on a cold MV3 worker round-trip.
+async function apply(override) {
+  const next = override || await getSettings();
+  if (needsFullRescan(settings, next) || !appliedCss) {
+    applyFull(next);
+  } else {
+    applyValues(next);
+  }
 }
 
 browser.runtime.onMessage.addListener((msg) => {
@@ -205,7 +320,7 @@ apply().catch(() => {});
 // Safety net: if settings resolved late and the parser had already emitted most
 // of the document before the observer was live, re-tag once the DOM is complete.
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', function scanLate() {
     if (settings && settings.enabled && !isBlocked(location.href, settings.blocklist)) {
       scan(document.documentElement);
     }

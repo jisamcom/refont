@@ -1,6 +1,6 @@
 {
   "name": "refont",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Replace page fonts everywhere except functional fonts (icons, math, barcode, ...).",
   "type": "module",
   "private": true,
