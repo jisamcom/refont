@@ -329,7 +329,14 @@ export function mountSettingsUI(root, ctx) {
     else { v.textContent = state.wordSpacing.toFixed(2) + 'em'; v.classList.remove('off'); }
   };
   const updWeight = () => { state.weight = +rWeight.value; $('vWeight').textContent = state.weight; markTicks(); };
-  const updWidth = () => { state.width = +rWidth.value; const v = $('vWidth'); v.textContent = state.width + '%'; v.classList.remove('off'); };
+  // 100% is the neutral width, so treat it as "off" (no font-stretch rule) — this
+  // gives a local way back to 원본 after the slider has been touched (min is 50).
+  const updWidth = () => {
+    state.width = (+rWidth.value === 100) ? 0 : +rWidth.value;
+    const v = $('vWidth');
+    if (state.width === 0) { v.textContent = '원본'; v.classList.add('off'); }
+    else { v.textContent = state.width + '%'; v.classList.remove('off'); }
+  };
   wire(rScale, updScale);
   wire(rMin, updMin);
   wire(rLh, updLh);

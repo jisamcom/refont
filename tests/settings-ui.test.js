@@ -97,6 +97,17 @@ describe('live preview wiring', () => {
     expect(root.querySelector('#sKr').style.fontOpticalSizing).toBe('none');
   });
 
+  it('treats width 100% as 원본/off — a local way back after the slider is touched', () => {
+    const root = document.createElement('div');
+    const api = mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1, settings: { ...DEFAULTS } });
+    const rWidth = root.querySelector('#rWidth');
+    rWidth.value = '80'; rWidth.dispatchEvent(new Event('input'));
+    expect(api.state.width).toBe(80);
+    rWidth.value = '100'; rWidth.dispatchEvent(new Event('input')); // back to neutral
+    expect(api.state.width).toBe(0);
+    expect(root.querySelector('#vWidth').textContent).toBe('원본');
+  });
+
   it('syncs the value chips to loaded settings on mount (not just on input)', () => {
     const root = document.createElement('div');
     mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1,
