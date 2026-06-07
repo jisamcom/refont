@@ -194,11 +194,22 @@ const MARKUP = `<div class="popup" id="popup">
 
   </div>`;
 
+// Parse a trusted, static HTML string into a fragment without innerHTML.
+// DOMParser doesn't execute scripts and isn't flagged by AMO static analysis;
+// MARKUP is developer-authored (no interpolation), so this is purely to satisfy
+// the "no innerHTML" lint while keeping the markup readable.
+function htmlToFragment(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const frag = document.createDocumentFragment();
+  frag.append(...doc.body.childNodes);
+  return frag;
+}
+
 export function mountSettingsUI(root, ctx) {
   const settings = ctx.settings || DEFAULTS;
   const state = settingsToState(settings);
   document.body.classList.add(ctx.context === 'options' ? 'ctx-options' : 'ctx-popup');
-  root.innerHTML = MARKUP;
+  root.replaceChildren(htmlToFragment(MARKUP));
 
   // ---- live specimen preview + sliders + weight + axes (scoped to root) ----
   const $ = (id) => root.querySelector('#' + id);
@@ -233,17 +244,23 @@ export function mountSettingsUI(root, ctx) {
 
   function drawReadout() {
     const r = $('readout');
-    const S = '<span class="sep">·</span>';
+    // {b:true} → <b>; plain → text. Built with DOM nodes so a custom font name
+    // (user input in state.family) can never inject markup here.
     const parts = [
-      '<b>' + labelOf(state.family) + '</b>',
-      '<b>' + state.scale.toFixed(2) + '×</b>',
-      '<b>' + state.weight + '</b>',
+      { b: true, t: labelOf(state.family) },
+      { b: true, t: state.scale.toFixed(2) + '×' },
+      { b: true, t: String(state.weight) },
     ];
-    if (state.minSize > 0) parts.push('min ' + state.minSize + 'px');
-    if (state.lineHeight > 0) parts.push('lh ' + state.lineHeight.toFixed(2));
-    if (state.letterSpacing != 0) parts.push('ls ' + state.letterSpacing.toFixed(1));
-    parseAxes(state.axes).forEach((a) => parts.push(a.tag + ' ' + a.val));
-    r.innerHTML = parts.join(' ' + S + ' ');
+    if (state.minSize > 0) parts.push({ t: 'min ' + state.minSize + 'px' });
+    if (state.lineHeight > 0) parts.push({ t: 'lh ' + state.lineHeight.toFixed(2) });
+    if (state.letterSpacing != 0) parts.push({ t: 'ls ' + state.letterSpacing.toFixed(1) });
+    parseAxes(state.axes).forEach((a) => parts.push({ t: a.tag + ' ' + a.val }));
+    r.replaceChildren();
+    parts.forEach((p, i) => {
+      if (i) { const s = document.createElement('span'); s.className = 'sep'; s.textContent = '·'; r.append(' ', s, ' '); }
+      if (p.b) { const b = document.createElement('b'); b.textContent = p.t; r.append(b); }
+      else r.append(p.t);
+    });
   }
 
   // ---- sliders ----
@@ -483,7 +500,7 @@ export function mountSettingsUI(root, ctx) {
 
   const pageFonts = ctx.pageFonts || [];
   const chips = $('pageFonts');
-  chips.innerHTML = '';
+  chips.replaceChildren();
   if (!pageFonts.length) {
     const empty = document.createElement('div');
     empty.className = 'empty';
@@ -622,7 +639,7 @@ export function mountSettingsUI(root, ctx) {
       return;
     }
     clearTimeout(resetTimer);
-    root.innerHTML = '';
+    root.replaceChildren();
     const fresh = mountSettingsUI(root, { ...ctx, settings: DEFAULTS });
     fresh.scheduleLiveApply();
   });
