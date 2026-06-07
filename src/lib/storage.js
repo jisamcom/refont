@@ -7,10 +7,13 @@ export const DEFAULTS = {
   schemaVersion: SCHEMA_VERSION,
   enabled: true,
   bodyFont: { source: 'system', name: '', url: null, urlType: 'css' },
+  webfontDisplay: 'swap', // @font-face font-display for a fetched file URL: 'swap' | 'optional'
   codeFont: null, // null = leave code/monospace untouched
   scale: 1,
   minSize: 0,
   weight: 0,
+  width: 0,              // font-stretch %; 0 = keep original (off)
+  opticalSizing: 'auto', // 'auto' (browser default) | 'none' (disable optical sizing)
   preserveBold: true,
   lineHeight: 0,
   letterSpacing: 0,

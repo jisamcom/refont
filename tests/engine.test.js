@@ -1,9 +1,23 @@
 // tests/engine.test.js
 import { describe, it, expect } from 'vitest';
 import {
-  sanitizeFamilyName, fontStack, parseAxes,
+  sanitizeFamilyName, sanitizeFontDisplay, fontStack, parseAxes, splitTextAxes,
   buildSkeletonCss, buildDynamicCss, engineVars, elementBase,
 } from '../src/lib/engine.js';
+
+describe('sanitizeFontDisplay', () => {
+  it('passes through allowed keywords', () => {
+    for (const v of ['swap', 'optional', 'auto', 'block', 'fallback']) {
+      expect(sanitizeFontDisplay(v)).toBe(v);
+    }
+  });
+  it('falls back to swap for unknown/missing/injection-y values', () => {
+    expect(sanitizeFontDisplay(undefined)).toBe('swap');
+    expect(sanitizeFontDisplay('')).toBe('swap');
+    expect(sanitizeFontDisplay('optional;}body{display:none')).toBe('swap');
+    expect(sanitizeFontDisplay('SWAP')).toBe('swap');
+  });
+});
 
 describe('sanitizeFamilyName', () => {
   it('strips double-quote, backslash, semicolon, braces, and angle brackets', () => {
@@ -91,10 +105,52 @@ describe('buildDynamicCss', () => {
     expect(css).toContain('[data-fc]:not([data-fc-code]){line-height:1.6 !important;}');
     expect(css).toContain('letter-spacing:0.5px');
   });
-  it('emits parsed axes (non-code) when present', () => {
+  it('routes registered axes to standard props and customs to font-variation-settings', () => {
     expect(buildDynamicCss({ axes: '' })).not.toContain('font-variation-settings');
-    expect(buildDynamicCss({ axes: 'opsz 14, wdth 80' }))
-      .toContain("[data-fc]:not([data-fc-code]){font-variation-settings:'opsz' 14,'wdth' 80 !important;}");
+    // opsz numeric stays in FVS (no numeric standard property); wdth → font-stretch.
+    const css = buildDynamicCss({ axes: 'opsz 14, wdth 80, GRAD 50' });
+    expect(css).toContain("font-variation-settings:'opsz' 14,'GRAD' 50 !important;");
+    expect(css).toContain('font-stretch:80% !important');
+    expect(css).not.toContain("'wdth'");
+  });
+  it('emits the width-dial font-stretch via the variable when width > 0', () => {
+    expect(buildDynamicCss({ width: 0 })).not.toContain('font-stretch');
+    expect(buildDynamicCss({ width: 90 }))
+      .toContain('[data-fc]:not([data-fc-code]){font-stretch:var(--refont-width) !important;}');
+  });
+  it('the width dial owns wdth: a typed wdth is ignored while the dial is on', () => {
+    const css = buildDynamicCss({ width: 120, axes: 'wdth 80' });
+    expect(css).toContain('font-stretch:var(--refont-width) !important;');
+    expect(css).not.toContain('font-stretch:80%');
+  });
+  it('emits font-optical-sizing:none only when opticalSizing is none (auto = browser default)', () => {
+    expect(buildDynamicCss({ opticalSizing: 'auto' })).not.toContain('font-optical-sizing');
+    expect(buildDynamicCss({ opticalSizing: 'none' }))
+      .toContain('[data-fc]:not([data-fc-code]){font-optical-sizing:none !important;}');
+  });
+  it('maps slnt to oblique (negated angle) and ital to font-style', () => {
+    expect(buildDynamicCss({ axes: 'slnt -6' })).toContain('font-style:oblique 6deg !important');
+    expect(buildDynamicCss({ axes: 'ital 1' })).toContain('font-style:italic !important');
+  });
+});
+
+describe('splitTextAxes', () => {
+  it('routes registered axes to standard props, customs to font-variation-settings', () => {
+    const { std, custom } = splitTextAxes({ axes: 'wdth 80, slnt -6, GRAD 50' });
+    expect(std['font-stretch']).toBe('80%');
+    expect(std['font-style']).toBe('oblique 6deg');
+    expect(custom).toEqual(["'GRAD' 50"]);
+  });
+  it('keeps numeric opsz in font-variation-settings (no numeric standard property)', () => {
+    const { std, custom } = splitTextAxes({ axes: 'opsz 14' });
+    expect(std).toEqual({});
+    expect(custom).toEqual(["'opsz' 14"]);
+  });
+  it('honors a typed wght/wdth only when the matching dial is off', () => {
+    expect(splitTextAxes({ axes: 'wght 600', weight: 0 }).std['font-weight']).toBe('600');
+    expect('font-weight' in splitTextAxes({ axes: 'wght 600', weight: 700 }).std).toBe(false);
+    expect(splitTextAxes({ axes: 'wdth 80', width: 0 }).std['font-stretch']).toBe('80%');
+    expect('font-stretch' in splitTextAxes({ axes: 'wdth 80', width: 120 }).std).toBe(false);
   });
 });
 
@@ -108,6 +164,10 @@ describe('engineVars', () => {
   it('omits --refont-weight when weight is 0, includes it otherwise', () => {
     expect('--refont-weight' in engineVars({ weight: 0 })).toBe(false);
     expect(engineVars({ weight: 600 })['--refont-weight']).toBe('600');
+  });
+  it('omits --refont-width when width is 0, includes it as a percentage otherwise', () => {
+    expect('--refont-width' in engineVars({ width: 0 })).toBe(false);
+    expect(engineVars({ width: 90 })['--refont-width']).toBe('90%');
   });
   it('defaults scale to 1 and min to 0px', () => {
     const v = engineVars({});

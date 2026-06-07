@@ -3,7 +3,7 @@ import browser from 'webextension-polyfill';
 import { MSG } from '../lib/messaging.js';
 import { DEFAULTS } from '../lib/storage.js';
 import { serializeSettings, parseSettings } from '../lib/settings-io.js';
-import { parseAxes } from '../lib/engine.js';
+import { parseAxes, splitTextAxes } from '../lib/engine.js';
 import { labelOf, toOptions } from './font-names.js';
 import { makeFontPicker } from './font-picker.js';
 
@@ -16,8 +16,10 @@ export function settingsToState(s) {
     family: bf.name || '',
     url: bf.url || '',
     urlType: bf.urlType || 'css',
+    webfontDisplay: s.webfontDisplay || 'swap',
     scale: s.scale, minSize: s.minSize, lineHeight: s.lineHeight, letterSpacing: s.letterSpacing,
     weight: s.weight, weightFine: !!s.weightFine, preserveBold: s.preserveBold !== false, axes: s.axes || '',
+    width: s.width || 0, opticalSizing: s.opticalSizing || 'auto',
     codeEnabled: !!(s.codeFont && s.codeFont.name),
     codeFamily: (s.codeFont && s.codeFont.name) || '',
     blocklist: (s.blocklist || []).slice(),
@@ -34,8 +36,10 @@ export function stateToSettings(st) {
   return {
     enabled: st.enabled,
     bodyFont: { source: st.source, name: st.family, url: st.source === 'weburl' ? st.url : null, urlType: st.urlType },
+    webfontDisplay: st.webfontDisplay,
     codeFont: st.codeEnabled && st.codeFamily ? { source: 'system', name: st.codeFamily, url: null, urlType: 'css' } : null,
     scale: st.scale, minSize: st.minSize, weight: st.weight, weightFine: st.weightFine,
+    width: st.width, opticalSizing: st.opticalSizing,
     preserveBold: st.preserveBold, lineHeight: st.lineHeight, letterSpacing: st.letterSpacing, axes: st.axes,
     blocklist: st.blocklist, protectionDenylistExtra: st.protectExtra,
     manualExclusions: st.manualExclusions, recentFonts: st.recentFonts,
@@ -94,6 +98,7 @@ const MARKUP = `<div class="popup" id="popup">
           <div id="webFamilyWrap" hidden>
             <label class="field">패밀리명 (파일 URL일 때 필수)</label>
             <input type="text" id="webFamily" placeholder="예: Pretendard" />
+            <span class="check" id="ckOptional" role="checkbox" aria-checked="false" tabindex="0" style="margin-top:9px"><span class="box"></span>레이아웃 시프트 최소화 (font-display: optional)</span>
           </div>
         </div>
       </section>
@@ -120,22 +125,27 @@ const MARKUP = `<div class="popup" id="popup">
         </div>
       </section>
 
-      <!-- WEIGHT -->
+      <!-- WEIGHT & WIDTH -->
       <section>
-        <div class="sec-h"><span class="t">Weight</span><span class="rule"></span></div>
+        <div class="sec-h"><span class="t">Weight &amp; width</span><span class="rule"></span></div>
         <div class="ctl">
           <div class="row"><span class="name">두께</span><span class="val" id="vWeight">700</span></div>
           <input type="range" id="rWeight" min="100" max="900" step="100" value="700" />
           <div class="ticks" id="ticks"></div>
         </div>
+        <div class="ctl">
+          <div class="row"><span class="name">너비</span><span class="val off" id="vWidth">원본</span></div>
+          <input type="range" id="rWidth" min="50" max="200" step="5" value="100" />
+        </div>
         <div class="minirow">
           <span class="check on" id="ckPreserve" role="checkbox" aria-checked="true" tabindex="0"><span class="box"></span>볼드 위계 보존</span>
           <span class="check" id="ckFine" role="checkbox" aria-checked="false" tabindex="0"><span class="box"></span>미세조정 (variable)</span>
+          <span class="check on" id="ckOptical" role="checkbox" aria-checked="true" tabindex="0"><span class="box"></span>광학 크기 자동</span>
         </div>
         <details class="adv">
           <summary>추가 가변 축 (variable axes)</summary>
-          <input type="text" id="axes" placeholder="예: opsz 14, wdth 80, slnt -6" style="margin-top:6px" />
-          <div class="sec-h" style="margin:8px 0 0"><span class="hint" style="font-size:11px;color:var(--ink-dim)"><code>tag value</code> 쌍을 쉼표로. 폰트가 지원하는 축만 적용됩니다.</span></div>
+          <input type="text" id="axes" placeholder="예: slnt -6, ital 1, GRAD 50" style="margin-top:6px" />
+          <div class="sec-h" style="margin:8px 0 0"><span class="hint" style="font-size:11px;color:var(--ink-dim)"><code>tag value</code> 쌍을 쉼표로. 두께·너비·광학크기는 위 컨트롤로 조절하세요. 등록 축은 표준 속성으로, 커스텀 축(대문자)은 font-variation-settings로 적용됩니다.</span></div>
         </details>
       </section>
 
@@ -224,13 +234,19 @@ export function mountSettingsUI(root, ctx) {
     const w = String(state.weight || 400);
     const ls = state.letterSpacing ? state.letterSpacing + 'px' : '';
     const lh = state.lineHeight > 0 ? state.lineHeight : '';
-    const fvs = ["'wght' " + w];
-    parseAxes(state.axes).forEach((a) => fvs.push("'" + a.tag + "' " + a.val));
-    const fvsStr = fvs.join(', ');
+    // Mirror the engine's split: registered axes → standard props, custom → FVS.
+    const { std, custom } = splitTextAxes(state);
+    const fvsStr = custom.join(', ');
+    const stretch = state.width > 0 ? state.width + '%' : (std['font-stretch'] || '');
+    const fstyle = std['font-style'] || '';
+    const optical = state.opticalSizing === 'none' ? 'none' : '';
     const kr = $('sKr'), en = $('sEn'), num = $('sNum');
     for (const el of [kr, en, num]) {
       el.style.fontFamily = fam;
       el.style.fontWeight = w;
+      el.style.fontStretch = stretch;
+      el.style.fontStyle = fstyle;
+      el.style.fontOpticalSizing = optical;
       el.style.letterSpacing = ls;
       el.style.lineHeight = lh;
       el.style.fontVariationSettings = fvsStr;
@@ -251,6 +267,8 @@ export function mountSettingsUI(root, ctx) {
       { b: true, t: state.scale.toFixed(2) + '×' },
       { b: true, t: String(state.weight) },
     ];
+    if (state.width > 0) parts.push({ t: 'wdth ' + state.width + '%' });
+    if (state.opticalSizing === 'none') parts.push({ t: 'opsz 끔' });
     if (state.minSize > 0) parts.push({ t: 'min ' + state.minSize + 'px' });
     if (state.lineHeight > 0) parts.push({ t: 'lh ' + state.lineHeight.toFixed(2) });
     if (state.letterSpacing != 0) parts.push({ t: 'ls ' + state.letterSpacing.toFixed(1) });
@@ -273,7 +291,7 @@ export function mountSettingsUI(root, ctx) {
     el.addEventListener('input', () => { setP(el); fn(); applyPreview(); });
   }
 
-  const rScale = $('rScale'), rMin = $('rMin'), rLh = $('rLh'), rLs = $('rLs'), rWeight = $('rWeight');
+  const rScale = $('rScale'), rMin = $('rMin'), rLh = $('rLh'), rLs = $('rLs'), rWeight = $('rWeight'), rWidth = $('rWidth');
 
   // Named updaters so the value chips can also be synced on load (not just on input).
   const updScale = () => { state.scale = +rScale.value; $('vScale').textContent = state.scale.toFixed(2) + '×'; };
@@ -291,11 +309,13 @@ export function mountSettingsUI(root, ctx) {
   };
   const updLs = () => { state.letterSpacing = +rLs.value; $('vLs').textContent = state.letterSpacing.toFixed(1) + 'px'; };
   const updWeight = () => { state.weight = +rWeight.value; $('vWeight').textContent = state.weight; markTicks(); };
+  const updWidth = () => { state.width = +rWidth.value; const v = $('vWidth'); v.textContent = state.width + '%'; v.classList.remove('off'); };
   wire(rScale, updScale);
   wire(rMin, updMin);
   wire(rLh, updLh);
   wire(rLs, updLs);
   wire(rWeight, updWeight);
+  wire(rWidth, updWidth);
 
   // ---- weight ticks ----
   const ticksWrap = $('ticks');
@@ -332,6 +352,8 @@ export function mountSettingsUI(root, ctx) {
     applyPreview();
   });
 
+  toggleCheck($('ckOptical'), (on) => { state.opticalSizing = on ? 'auto' : 'none'; applyPreview(); });
+
   $('axes').addEventListener('input', (e) => { state.axes = e.target.value; applyPreview(); });
 
   // ---- initialize controls from state (before first applyPreview) ----
@@ -343,6 +365,11 @@ export function mountSettingsUI(root, ctx) {
   rWeight.value = state.weight || 400;
   rWeight.step = state.weightFine ? 1 : 100;
   $('vWeight').textContent = state.weight === 0 ? '원본' : state.weight;
+  // width:0 (원본/keep) → position slider at 100% but keep state.width at 0 for saving.
+  rWidth.value = state.width || 100;
+  const vWidth = $('vWidth');
+  if (state.width === 0) { vWidth.textContent = '원본'; vWidth.classList.add('off'); }
+  else { vWidth.textContent = state.width + '%'; vWidth.classList.remove('off'); }
   $('axes').value = state.axes;
   // Sync the size/rhythm value chips to the loaded settings (weight chip handled above).
   updScale(); updMin(); updLh(); updLs();
@@ -354,8 +381,12 @@ export function mountSettingsUI(root, ctx) {
   const ckFine = $('ckFine');
   ckFine.setAttribute('aria-checked', String(!!state.weightFine));
   ckFine.classList.toggle('on', !!state.weightFine);
+  const ckOptical = $('ckOptical');
+  const opticalOn = state.opticalSizing !== 'none';
+  ckOptical.setAttribute('aria-checked', String(opticalOn));
+  ckOptical.classList.toggle('on', opticalOn);
 
-  [rScale, rMin, rLh, rLs, rWeight].forEach(setP);
+  [rScale, rMin, rLh, rLs, rWeight, rWidth].forEach(setP);
   markTicks();
   applyPreview();
 
@@ -431,6 +462,12 @@ export function mountSettingsUI(root, ctx) {
   $('webUrl').addEventListener('input', (e) => { state.url = e.target.value; });
   $('webFamily').value = (state.source === 'weburl') ? state.family : '';
   $('webFamily').addEventListener('input', (e) => { state.family = e.target.value; });
+
+  // font-display: optional (file URL only) — minimizes layout shift on swap.
+  const ckOptional = $('ckOptional');
+  toggleCheck(ckOptional, (on) => { state.webfontDisplay = on ? 'optional' : 'swap'; scheduleLiveApply(); });
+  ckOptional.setAttribute('aria-checked', String(state.webfontDisplay === 'optional'));
+  ckOptional.classList.toggle('on', state.webfontDisplay === 'optional');
 
   // ---- code check ----
   toggleCheck($('ckCode'), (on) => { state.codeEnabled = on; $('codeWrap').hidden = !on; scheduleLiveApply(); });

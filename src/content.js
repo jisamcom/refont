@@ -3,7 +3,8 @@ import browser from 'webextension-polyfill';
 import { MSG } from './lib/messaging.js';
 import { isBlocked } from './lib/url-match.js';
 import {
-  buildSkeletonCss, buildDynamicCss, engineVars, elementBase, ENGINE_VAR_NAMES, sanitizeFamilyName,
+  buildSkeletonCss, buildDynamicCss, engineVars, elementBase, ENGINE_VAR_NAMES,
+  sanitizeFamilyName, sanitizeFontDisplay,
 } from './lib/engine.js';
 import { shouldProtect, hasIconClassHint, isProtectedFamily } from './lib/font-protection.js';
 import { directText, isCodeElement, dedupeRoots } from './lib/dom-utils.js';
@@ -193,7 +194,8 @@ async function injectWebFont() {
   } else {
     try {
       const dataUrl = await browser.runtime.sendMessage({ type: MSG.FETCH_FONT, url: bf.url });
-      style.textContent = `@font-face{font-family:"${sanitizeFamilyName(bf.name)}";src:url(${dataUrl});font-display:swap;}`;
+      const display = sanitizeFontDisplay(settings.webfontDisplay);
+      style.textContent = `@font-face{font-family:"${sanitizeFamilyName(bf.name)}";src:url(${dataUrl});font-display:${display};}`;
     } catch { return; }
   }
   (document.head || document.documentElement).appendChild(style);
@@ -232,6 +234,13 @@ function clearVars() {
 // the anti-flash path: unlike the user-origin sheet (which travels async through
 // the service worker), this <style> exists before the browser's first paint, so
 // a tagged element is already styled the instant the parser emits it.
+//
+// GUARDRAIL (w3c/webextensions#906): the author-origin half of Refont MUST stay
+// an in-page <style> node — do NOT replace it with scripting.insertCSS({ origin:
+// 'AUTHOR' }). Chrome mis-files AUTHOR-origin injected CSS at the user origin
+// (cascade-incorrect; Firefox is spec-correct), and insertCSS is async so it
+// can't land before first paint anyway. The async USER-origin sheet (see
+// background.js) is the only insertCSS path, and it's intentionally USER.
 function injectStaticStyle(css) {
   let style = document.getElementById(STATIC_STYLE_ID);
   if (!style) {
