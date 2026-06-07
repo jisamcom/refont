@@ -1,7 +1,8 @@
 import { build } from 'esbuild';
-import { cpSync, mkdirSync, rmSync, copyFileSync } from 'node:fs';
+import { cpSync, mkdirSync, rmSync, copyFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildSkeletonCss } from '../src/lib/engine.js';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const target = process.argv[2] || 'chrome';
@@ -23,6 +24,13 @@ await build({
   outdir,
   logLevel: 'info',
 });
+
+// Bootstrap stylesheet: the static rule skeleton, declared via manifest
+// content_scripts.css so the font-family rules exist before content.js even
+// executes (earliest possible FOUC defense). Generated from the engine so it can
+// never drift from buildSkeletonCss(). Until content.js sets the --refont-*
+// variables and tags elements, the var() rules resolve to nothing — harmless.
+writeFileSync(join(outdir, 'refont-bootstrap.css'), `${buildSkeletonCss()}\n`);
 
 // static assets
 copyFileSync(join(root, 'public/options.html'), join(outdir, 'options.html'));

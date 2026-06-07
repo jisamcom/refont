@@ -9,6 +9,13 @@ export function directText(el) {
   return s;
 }
 
+// Drop any node that is contained by another node in the same batch: scanning
+// the outermost node already walks its descendants, so scanning a descendant
+// too is redundant work. Used to coalesce a MutationObserver burst.
+export function dedupeRoots(nodes) {
+  return nodes.filter((n) => !nodes.some((o) => o !== n && o.contains && o.contains(n)));
+}
+
 const CODE_TAGS = new Set(['CODE', 'PRE', 'KBD', 'SAMP', 'TT']);
 
 export function isCodeElement(el, computedFamily) {

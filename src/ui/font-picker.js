@@ -1,5 +1,15 @@
 // src/ui/font-picker.js
 import { labelOf } from './font-names.js';
+import { sanitizeFamilyName } from '../lib/engine.js';
+
+// Family names can arrive from imported settings or free-text "직접 입력". Never
+// interpolate them into innerHTML (a crafted name is a DOM-injection/XSS vector
+// on this privileged extension page). Build a quoted, sanitized CSS family
+// instead and assign it through the CSSOM, which cannot break out into markup.
+function famStack(name, generic = 'sans-serif') {
+  const safe = sanitizeFamilyName(name);
+  return safe ? `'${safe}',${generic}` : generic;
+}
 
 // Pure: filter option objects by query against family + Korean name.
 export function filterFonts(fonts, q) {
@@ -23,16 +33,19 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
   const bName = mount.querySelector('.fp-name');
   const labFor = (fam) => { const o = fonts.find((x) => x.f === fam); return o ? (o.ko || o.f).replace(' Variable', '') : labelOf(fam); };
   const paintBtn = () => {
-    bSamp.style.fontFamily = `'${val}',sans-serif`; bSamp.textContent = sample;
+    bSamp.style.fontFamily = famStack(val); bSamp.textContent = sample;
     bName.textContent = labFor(val); bName.classList.toggle('custom', custom);
   };
   const optFor = (fam) => fonts.find((x) => x.f === fam) || { f: fam };
   const labOf = (o) => (o.ko || o.f).replace(' Variable', '');
+  const span = (cls, text) => { const s = document.createElement('span'); s.className = cls; if (text != null) s.textContent = text; return s; };
   function addRow(o) {
     const f = o.f; const lab = labOf(o);
     const row = document.createElement('div');
     row.className = 'fp-opt' + (f === val ? ' sel' : '');
-    row.innerHTML = `<span class="o-check">✓</span><span class="o-name" style="font-family:'${f}',sans-serif">${lab}</span><span class="o-spec" style="font-family:'${f}',sans-serif">${sample} 012</span>`;
+    const name = span('o-name', lab); name.style.fontFamily = famStack(f);
+    const spec = span('o-spec', `${sample} 012`); spec.style.fontFamily = famStack(f);
+    row.append(span('o-check', '✓'), name, spec);
     row.onclick = () => pick(f, false);
     list.appendChild(row);
   }
@@ -54,10 +67,10 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
     if (typed && !fonts.some((o) => o.f.toLowerCase() === typed.toLowerCase() || (o.ko && o.ko.toLowerCase() === typed.toLowerCase()))) {
       const row = document.createElement('div');
       row.className = 'fp-opt mk';
-      row.innerHTML = `<span class="o-check">✓</span><span class="o-name">직접 사용: "${typed}"</span><span class="badge">custom</span>`;
+      row.append(span('o-check', '✓'), span('o-name', `직접 사용: "${typed}"`), span('badge', 'custom'));
       row.onclick = () => pick(typed, true); list.appendChild(row);
     }
-    if (!list.children.length) list.innerHTML = '<div class="fp-empty">결과 없음 — 입력해서 직접 지정하세요</div>';
+    if (!list.children.length) { list.textContent = ''; list.append(span('fp-empty', '결과 없음 — 입력해서 직접 지정하세요')); }
   }
   const open = () => { mount.classList.add('open'); panel.hidden = false; search.value = ''; render(''); search.focus(); };
   const close = () => { mount.classList.remove('open'); panel.hidden = true; };

@@ -6,7 +6,17 @@ import { describe, it, expect, vi } from 'vitest';
 // browser-wiring guard in background.js false, so only pure exports load.
 vi.mock('webextension-polyfill', () => ({ default: {} }));
 
-import { guessFontMime, arrayBufferToBase64, fetchFontAsDataUrl, cssTarget } from '../src/background.js';
+import {
+  guessFontMime, arrayBufferToBase64, fetchFontAsDataUrl, cssTarget,
+  classifyFontResponse, fetchFontCached, MAX_FONT_BYTES,
+} from '../src/background.js';
+
+function fontRes(bytes, { contentType, contentLength } = {}) {
+  const headers = new Map();
+  if (contentType != null) headers.set('content-type', contentType);
+  if (contentLength != null) headers.set('content-length', String(contentLength));
+  return { ok: true, status: 200, headers, arrayBuffer: async () => new Uint8Array(bytes).buffer };
+}
 
 describe('cssTarget', () => {
   it('targets the sender frame so CSS reaches iframes (e.g. Naver Cafe #cafe_main)', () => {
@@ -47,5 +57,54 @@ describe('fetchFontAsDataUrl', () => {
   it('throws on http error', async () => {
     const fakeFetch = async () => ({ ok: false, status: 404 });
     await expect(fetchFontAsDataUrl('https://x/a.woff2', fakeFetch)).rejects.toThrow(/404/);
+  });
+  it('rejects an HTML response (hotlink-protection / error page)', async () => {
+    const fakeFetch = async () => fontRes([60, 33], { contentType: 'text/html; charset=utf-8' });
+    await expect(fetchFontAsDataUrl('https://x/a.woff2', fakeFetch)).rejects.toThrow(/not-font|rejected/);
+  });
+  it('rejects an oversized font by declared Content-Length before downloading', async () => {
+    let downloaded = false;
+    const fakeFetch = async () => ({
+      ok: true, status: 200,
+      headers: new Map([['content-length', String(MAX_FONT_BYTES + 1)], ['content-type', 'font/woff2']]),
+      arrayBuffer: async () => { downloaded = true; return new Uint8Array([1]).buffer; },
+    });
+    await expect(fetchFontAsDataUrl('https://x/a.woff2', fakeFetch)).rejects.toThrow(/large/);
+    expect(downloaded).toBe(false);
+  });
+});
+
+describe('classifyFontResponse', () => {
+  it('accepts font content-types, octet-stream, and font extensions', () => {
+    expect(classifyFontResponse({ url: 'https://x/a.woff2', contentType: 'font/woff2', byteLength: 10 })).toBe('ok');
+    expect(classifyFontResponse({ url: 'https://x/a', contentType: 'application/octet-stream', byteLength: 10 })).toBe('ok');
+    expect(classifyFontResponse({ url: 'https://x/a.ttf', contentType: '', byteLength: 10 })).toBe('ok');
+  });
+  it('rejects HTML/JSON error pages', () => {
+    expect(classifyFontResponse({ url: 'https://x/a.woff2', contentType: 'text/html', byteLength: 10 })).toBe('not-font');
+    expect(classifyFontResponse({ url: 'https://x/a', contentType: 'application/json', byteLength: 10 })).toBe('not-font');
+  });
+  it('rejects oversized payloads', () => {
+    expect(classifyFontResponse({ url: 'https://x/a.woff2', contentType: 'font/woff2', byteLength: MAX_FONT_BYTES + 1 })).toBe('too-large');
+  });
+});
+
+describe('fetchFontCached', () => {
+  it('fetches a URL once and serves repeats from cache (all_frames amplification)', async () => {
+    let calls = 0;
+    const fakeFetch = async () => { calls += 1; return fontRes([1, 2, 3], { contentType: 'font/woff2' }); };
+    const url = 'https://x/cached-once.woff2';
+    const a = await fetchFontCached(url, fakeFetch);
+    const b = await fetchFontCached(url, fakeFetch);
+    expect(a).toBe(b);
+    expect(calls).toBe(1);
+  });
+  it('does not cache failures (lets a later retry succeed)', async () => {
+    let calls = 0;
+    const flaky = async () => { calls += 1; if (calls === 1) throw new Error('boom'); return fontRes([9], { contentType: 'font/woff2' }); };
+    const url = 'https://x/flaky.woff2';
+    await expect(fetchFontCached(url, flaky)).rejects.toThrow(/boom/);
+    await expect(fetchFontCached(url, flaky)).resolves.toMatch(/^data:font\/woff2/);
+    expect(calls).toBe(2);
   });
 });
