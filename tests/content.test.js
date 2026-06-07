@@ -118,6 +118,24 @@ describe('content var-engine', () => {
     expect(sheetText()).toContain('[data-fc-wbold]{font-weight:var(--refont-weight)');
   });
 
+  it('injects the web-font @font-face with the chosen font-display (file URL)', async () => {
+    fakeBrowser.runtime.sendMessage.mockImplementation(async (m) => {
+      if (m && m.type === MSG.FETCH_FONT) return 'data:font/woff2;base64,AAAA';
+      return {};
+    });
+    const weburl = makeSettings({
+      bodyFont: { source: 'weburl', name: 'Pretendard', url: 'https://x/p.woff2', urlType: 'file' },
+      webfontDisplay: 'optional',
+    });
+    await freshApply(weburl);
+    await tick();
+    const ff = document.getElementById('__refont_webfont');
+    expect(ff).not.toBeNull();
+    expect(ff.textContent).toContain('font-display:optional');
+    expect(ff.textContent).toContain('@font-face');
+    fakeBrowser.runtime.sendMessage.mockImplementation(async () => ({}));
+  });
+
   it('leaves a protected (icon-font) element untouched', async () => {
     document.body.innerHTML = '<span id="ic" style="font-family:FontAwesome;font-size:12px">icon</span>';
     await freshApply(makeSettings({ scale: 2 }));

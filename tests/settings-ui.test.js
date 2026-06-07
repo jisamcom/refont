@@ -25,6 +25,14 @@ describe('settingsToState / stateToSettings', () => {
     expect(st.codeEnabled).toBe(false);
     expect(stateToSettings(st).codeFont).toBeNull();
   });
+  it('round-trips width and opticalSizing', () => {
+    const st = settingsToState({ ...DEFAULTS, width: 90, opticalSizing: 'none' });
+    expect(st.width).toBe(90);
+    expect(st.opticalSizing).toBe('none');
+    const back = stateToSettings(st);
+    expect(back.width).toBe(90);
+    expect(back.opticalSizing).toBe('none');
+  });
 });
 
 describe('previewSize', () => {
@@ -56,6 +64,19 @@ describe('live preview wiring', () => {
     const rScale = root.querySelector('#rScale');
     rScale.value = '2'; rScale.dispatchEvent(new Event('input'));
     expect(parseFloat(root.querySelector('#sEn').style.fontSize)).toBeGreaterThan(20);
+  });
+
+  it('drives specimen font-stretch from the width dial and font-optical-sizing from the toggle', () => {
+    const root = document.createElement('div');
+    const api = mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1, settings: { ...DEFAULTS } });
+    const rWidth = root.querySelector('#rWidth');
+    rWidth.value = '80'; rWidth.dispatchEvent(new Event('input'));
+    expect(api.state.width).toBe(80);
+    expect(root.querySelector('#sKr').style.fontStretch).toBe('80%');
+    const ckOptical = root.querySelector('#ckOptical');
+    ckOptical.click(); // auto → none
+    expect(api.state.opticalSizing).toBe('none');
+    expect(root.querySelector('#sKr').style.fontOpticalSizing).toBe('none');
   });
 
   it('syncs the value chips to loaded settings on mount (not just on input)', () => {

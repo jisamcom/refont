@@ -79,6 +79,15 @@ export function cssTarget(tabId, frameId) {
 }
 
 // ---- Browser wiring (no-ops in unit tests where runtime is absent) ----
+//
+// GUARDRAIL (w3c/webextensions#906): keep `origin: 'USER'` here, and keep the
+// author-origin rules in content.js's synchronous in-page <style> — do NOT move
+// author styling to scripting.insertCSS({ origin: 'AUTHOR' }). Chrome currently
+// mis-files AUTHOR-origin injected CSS at the *user* origin (so author
+// !important wouldn't beat real page author !important), while Firefox files it
+// per spec — switching would silently break the cascade on Chrome only. The
+// USER-origin sheet here is the reinforcement path precisely *because* user
+// !important outranks author !important regardless of that bug.
 async function applyCssToTab(tabId, css, frameId) {
   if (!css) return;
   await browser.scripting.insertCSS({ target: cssTarget(tabId, frameId), css, origin: 'USER' });

@@ -13,6 +13,17 @@ export function fontStack(name, generic = 'sans-serif') {
   return `"${safe}", ${EMOJI_FONTS}, ${generic}`;
 }
 
+// Allowed @font-face font-display keywords. Refont only surfaces 'swap' (default;
+// no FOIT) and 'optional' (minimize layout shift — the browser uses the custom
+// font only if it's ready almost immediately, else keeps the fallback for the
+// page's lifetime; with our inlined data: URL it's effectively always ready, so
+// 'optional' buys near-zero CLS), but the others are accepted if ever passed in.
+export const WEBFONT_DISPLAY_VALUES = ['swap', 'optional', 'auto', 'block', 'fallback'];
+
+export function sanitizeFontDisplay(v) {
+  return WEBFONT_DISPLAY_VALUES.includes(v) ? v : 'swap';
+}
+
 // Parse "opsz 14, wdth 80, slnt -6" -> [{tag:'opsz', val:'14'}, ...]. Drops malformed pairs.
 export function parseAxes(str) {
   return String(str || '')
@@ -24,6 +35,39 @@ export function parseAxes(str) {
       return m ? { tag: m[1], val: m[2] } : null;
     })
     .filter(Boolean);
+}
+
+// Split the free-text variable-axis field into standard CSS properties vs
+// font-variation-settings. MDN guidance: drive *registered* axes through their
+// standard property (font-weight/font-stretch/font-style), and reserve
+// font-variation-settings for *custom* (uppercase-tagged) axes — it's a
+// low-level override that otherwise bypasses the cascade.
+//
+//   wght → font-weight        wdth → font-stretch (%)
+//   slnt → font-style: oblique <angle>   (CSS oblique angle is the negative of
+//                                          the OpenType slnt value)
+//   ital → font-style: italic|normal
+//   opsz → no numeric standard property exists, so a *numeric* opsz stays in
+//          font-variation-settings (the auto/none switch is font-optical-sizing,
+//          surfaced separately as a toggle, not here).
+//
+// wght/wdth are owned by the dedicated weight/width dials; a value typed in the
+// text field is honored only when that dial is OFF (weight 0 / width 0), so the
+// dial stays the single source of truth and the two never emit a conflicting
+// rule for the same property.
+export function splitTextAxes(settings) {
+  const s = settings || {};
+  const std = {};      // { 'font-weight': '600', 'font-stretch': '80%', ... }
+  const custom = [];   // ["'GRAD' 50", "'opsz' 14"]  → font-variation-settings
+  for (const a of parseAxes(s.axes)) {
+    const lower = a.tag.toLowerCase();
+    if (lower === 'wght') { if (!(s.weight > 0)) std['font-weight'] = a.val; }
+    else if (lower === 'wdth') { if (!(s.width > 0)) std['font-stretch'] = `${a.val}%`; }
+    else if (lower === 'slnt') { std['font-style'] = `oblique ${-Number(a.val)}deg`; }
+    else if (lower === 'ital') { std['font-style'] = Number(a.val) >= 1 ? 'italic' : 'normal'; }
+    else custom.push(`'${a.tag}' ${a.val}`);
+  }
+  return { std, custom };
 }
 
 // ---- CSS-variable engine ----
@@ -74,10 +118,23 @@ export function buildDynamicCss(settings) {
   if (s.letterSpacing && s.letterSpacing !== 0) {
     rules.push(`[data-fc]:not([data-fc-code]){letter-spacing:${s.letterSpacing}px !important;}`);
   }
-  const axes = parseAxes(s.axes);
-  if (axes.length) {
-    const decl = axes.map((a) => `'${a.tag}' ${a.val}`).join(',');
-    rules.push(`[data-fc]:not([data-fc-code]){font-variation-settings:${decl} !important;}`);
+  // Width dial → font-stretch via a variable (cheap to drag, like weight).
+  if ((s.width || 0) > 0) {
+    rules.push('[data-fc]:not([data-fc-code]){font-stretch:var(--refont-width) !important;}');
+  }
+  // Optical-sizing toggle. 'auto' is the browser default → emit nothing; only
+  // 'none' needs a rule to switch automatic optical sizing off.
+  if (s.opticalSizing === 'none') {
+    rules.push('[data-fc]:not([data-fc-code]){font-optical-sizing:none !important;}');
+  }
+  // Free-text axes: registered axes as standard properties, custom as FVS.
+  const { std, custom } = splitTextAxes(s);
+  const stdDecls = Object.entries(std).map(([prop, val]) => `${prop}:${val} !important`);
+  if (stdDecls.length) {
+    rules.push(`[data-fc]:not([data-fc-code]){${stdDecls.join(';')};}`);
+  }
+  if (custom.length) {
+    rules.push(`[data-fc]:not([data-fc-code]){font-variation-settings:${custom.join(',')} !important;}`);
   }
   return rules.join('\n');
 }
@@ -93,10 +150,11 @@ export function engineVars(settings) {
     '--refont-min': `${s.minSize || 0}px`,
   };
   if ((s.weight || 0) > 0) vars['--refont-weight'] = String(s.weight);
+  if ((s.width || 0) > 0) vars['--refont-width'] = `${s.width}%`;
   return vars;
 }
 
-export const ENGINE_VAR_NAMES = ['--refont-body-stack', '--refont-code-stack', '--refont-scale', '--refont-min', '--refont-weight'];
+export const ENGINE_VAR_NAMES = ['--refont-body-stack', '--refont-code-stack', '--refont-scale', '--refont-min', '--refont-weight', '--refont-width'];
 
 // Classify a tagged element from its *original* computed font props. sizePx>0
 // → the element carries --fc-base-size and the scaling rule applies. The weight

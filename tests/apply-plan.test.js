@@ -21,6 +21,12 @@ describe('webfontSig', () => {
     const b = base(); b.bodyFont = { source: 'weburl', url: 'https://x/b.css', urlType: 'css', name: 'A' };
     expect(webfontSig(a)).not.toBe(webfontSig(b));
   });
+  it('changes when font-display changes (re-injects the @font-face)', () => {
+    const a = base(); a.bodyFont = { source: 'weburl', url: 'https://x/a.woff2', urlType: 'file', name: 'A' }; a.webfontDisplay = 'swap';
+    const b = base(); b.bodyFont = { source: 'weburl', url: 'https://x/a.woff2', urlType: 'file', name: 'A' }; b.webfontDisplay = 'optional';
+    expect(webfontSig(a)).not.toBe(webfontSig(b));
+    expect(needsFullRescan(a, b)).toBe(true);
+  });
 });
 
 describe('needsFullRescan', () => {

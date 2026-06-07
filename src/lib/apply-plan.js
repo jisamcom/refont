@@ -19,10 +19,13 @@ const eq = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 // A web font is only (re)fetched/injected when its source identity changes.
 // A *system* family swap is just a stylesheet edit, so it collapses to 'system'.
+// font-display rides along: it's baked into the @font-face, so changing it must
+// re-inject the web-font <style> (only the file path emits it, but a no-op for
+// the css/@import path is harmless).
 export function webfontSig(s) {
   const bf = (s && s.bodyFont) || {};
   if (bf.source !== 'weburl') return 'system';
-  return `weburl|${bf.url || ''}|${bf.urlType || ''}|${bf.name || ''}`;
+  return `weburl|${bf.url || ''}|${bf.urlType || ''}|${bf.name || ''}|${(s && s.webfontDisplay) || ''}`;
 }
 
 export function needsFullRescan(prev, next) {
