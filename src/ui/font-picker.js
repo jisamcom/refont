@@ -23,14 +23,19 @@ export function filterFonts(fonts, q) {
 export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange, recent }) {
   let val = value;
   let custom = !fonts.some((o) => o.f === value);
-  mount.innerHTML = `<button type="button" class="fp-btn"><span class="fp-sample"></span><span class="fp-name"></span><span class="fp-cv">⌄</span></button>
-   <div class="fp-panel" hidden><input class="fp-search" placeholder="검색 또는 직접 입력…"><div class="fp-list"></div></div>`;
-  const btn = mount.querySelector('.fp-btn');
-  const panel = mount.querySelector('.fp-panel');
-  const list = mount.querySelector('.fp-list');
-  const search = mount.querySelector('.fp-search');
-  const bSamp = mount.querySelector('.fp-sample');
-  const bName = mount.querySelector('.fp-name');
+  // Build via DOM APIs (no innerHTML) — keeps AMO's static-analysis happy and is
+  // injection-proof by construction.
+  const el = (tag, cls) => { const n = document.createElement(tag); if (cls) n.className = cls; return n; };
+  const btn = el('button', 'fp-btn'); btn.type = 'button';
+  const bSamp = el('span', 'fp-sample');
+  const bName = el('span', 'fp-name');
+  const cv = el('span', 'fp-cv'); cv.textContent = '⌄';
+  btn.append(bSamp, bName, cv);
+  const panel = el('div', 'fp-panel'); panel.hidden = true;
+  const search = el('input', 'fp-search'); search.placeholder = '검색 또는 직접 입력…';
+  const list = el('div', 'fp-list');
+  panel.append(search, list);
+  mount.replaceChildren(btn, panel);
   const labFor = (fam) => { const o = fonts.find((x) => x.f === fam); return o ? (o.ko || o.f).replace(' Variable', '') : labelOf(fam); };
   const paintBtn = () => {
     bSamp.style.fontFamily = famStack(val); bSamp.textContent = sample;
@@ -53,7 +58,7 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
     const g = document.createElement('div'); g.className = 'fp-group'; g.textContent = label; list.appendChild(g);
   }
   function render(q = '') {
-    list.innerHTML = '';
+    list.replaceChildren();
     const typed = String(q || '').trim();
     if (!typed) {
       const rec = (typeof recent === 'function' ? recent() : recent) || [];
