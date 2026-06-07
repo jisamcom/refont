@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.3 — 2026-06-07
+
+### 🐛 Fixes
+- migrate imported settings; width off-path; release runner detection
+
 ## v0.2.2 — 2026-06-07
 
 ### 🐛 Fixes
