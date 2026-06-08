@@ -11,6 +11,9 @@
 //   - Aborts if tests fail (before touching any files) and if the tag already exists.
 //   - Commit messages carry NO Co-Authored-By trailer (project convention).
 //   - Pushes the specific tag, never `--tags` (avoids leaking local/backup tags).
+//   - With --push + GITHUB_TOKEN, creates a *draft* GitHub Release. Store
+//     deployment only runs on `release: published`, so nothing ships until you
+//     click "Publish release" on GitHub — a deliberate manual gate.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -133,9 +136,12 @@ async function createGithubRelease() {
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'refont-release' };
   try {
     console.log(`\n▶ Creating GitHub Release ${tag}…`);
+    // Create as a DRAFT: store deployment only fires on `release: published`,
+    // so nothing ships until you click "Publish release" on GitHub. This is the
+    // deliberate manual gate before the Chrome/Firefox upload workflow runs.
     const res = await fetch(`${api}/releases`, {
       method: 'POST', headers,
-      body: JSON.stringify({ tag_name: tag, name: tag, body: section }),
+      body: JSON.stringify({ tag_name: tag, name: tag, body: section, draft: true }),
     });
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     const rel = await res.json();
@@ -147,7 +153,8 @@ async function createGithubRelease() {
       });
       console.log(up.ok ? `  ↑ ${name}` : `  ! upload failed ${name}: ${up.status}`);
     }
-    console.log(`✓ GitHub Release: ${rel.html_url}`);
+    console.log(`✓ Draft GitHub Release: ${rel.html_url}`);
+    console.log('  → Review it, then click "Publish release" to deploy to the Chrome + Firefox stores.');
   } catch (e) {
     console.warn(`! GitHub Release failed (push + tag already done): ${e.message}`);
   }
