@@ -1,0 +1,74 @@
+name: Publish release to stores
+
+# Fires when a GitHub Release is *published* (not on draft creation).
+# `bun scripts/release.mjs X.Y.Z --push` publishes a release → this runs.
+# Publishing a draft release from the GitHub UI works too.
+on:
+  release:
+    types: [published]
+
+# Never let two publishes race for the same store item.
+concurrency:
+  group: store-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout the released tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build + package (chrome, firefox, source zips)
+        run: npm run package
+
+      - name: Resolve artifact paths
+        id: art
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "chrome=dist/refont-chrome-$VERSION.zip"  >> "$GITHUB_OUTPUT"
+          echo "firefox=dist/refont-firefox-$VERSION.zip" >> "$GITHUB_OUTPUT"
+          echo "source=dist/refont-source-$VERSION.zip"   >> "$GITHUB_OUTPUT"
+
+      - name: Sanity check — package.json version matches the release tag
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          GOT="v${{ steps.art.outputs.version }}"
+          test "$GOT" = "$TAG" \
+            || { echo "::error::package.json $GOT != release tag $TAG"; exit 1; }
+
+      - name: Publish to Chrome Web Store
+        uses: mnao305/chrome-extension-upload@v6.0.0
+        with:
+          file-path: ${{ steps.art.outputs.chrome }}
+          extension-id: ${{ secrets.CHROME_EXTENSION_ID }}
+          client-id: ${{ secrets.CHROME_CLIENT_ID }}
+          client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          publish: true
+
+      - name: Publish to Firefox Add-ons (AMO)
+        uses: wdzeng/firefox-addon@v1
+        with:
+          addon-guid: refont@jisam
+          xpi-path: ${{ steps.art.outputs.firefox }}
+          # AMO requires source when code is bundled/minified (esbuild) — Refont is.
+          source-file-path: ${{ steps.art.outputs.source }}
+          jwt-issuer: ${{ secrets.FIREFOX_JWT_ISSUER }}
+          jwt-secret: ${{ secrets.FIREFOX_JWT_SECRET }}
