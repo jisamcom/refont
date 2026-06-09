@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.4 — 2026-06-09
+
+### 🐛 Fixes
+- O(n^2) dedupeRoots froze huge pages for seconds
+
 ## v0.2.3 — 2026-06-07
 
 ### 🐛 Fixes
