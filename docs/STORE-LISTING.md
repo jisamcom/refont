@@ -1,7 +1,6 @@
 # Refont — 스토어 등록 정보 (한국어)
 
 > 이 문서의 텍스트를 Chrome Web Store / Firefox AMO 등록 폼에 그대로 복사해서 쓰면 됩니다.
-> 제출 절차는 [STORE-SUBMISSION.md](STORE-SUBMISSION.md) 참고.
 
 ---
 
@@ -11,7 +10,7 @@
 - **버전:** 0.1.0
 - **기본 언어(Default locale):** 한국어
 - **홈페이지/지원:** https://github.com/jisamcom/refont
-- **개인정보처리방침 URL:** (호스팅 후 입력 — [STORE-SUBMISSION.md](STORE-SUBMISSION.md)의 "개인정보처리방침 호스팅" 참고)
+- **개인정보처리방침 URL:** (호스팅 후 입력)
 - **데이터 수집:** 없음
 
 ---

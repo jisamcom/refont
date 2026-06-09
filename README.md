@@ -66,8 +66,6 @@ npm run screenshots    # 스토어 스크린샷 PNG 생성 (docs/store-assets/)
 
 - [개인정보처리방침](docs/PRIVACY.md)
 - [스토어 등록 정보(한국어)](docs/STORE-LISTING.md)
-- [스토어 제출 런북](docs/STORE-SUBMISSION.md)
-- [수동 테스트 체크리스트](docs/MANUAL-TEST.md)
 - [AMO 심사자용 빌드 안내](docs/REVIEWERS.md)
 
 ## 라이선스
