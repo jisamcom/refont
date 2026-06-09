@@ -45,4 +45,30 @@ describe('dedupeRoots', () => {
     const a = wrap.children[0]; const b = wrap.children[1];
     expect(dedupeRoots([a, b])).toEqual([a, b]);
   });
+  // Regression: on a huge mutation burst (e.g. a streaming namu.wiki page the
+  // observer reports as thousands of individual added nodes) the old O(n^2)
+  // `nodes.some(o => o.contains(n))` did ~19M DOM containment calls for ~7.5k
+  // nodes — multiple seconds of main-thread block. Dedup must stay ~O(n): walk
+  // each node's ancestor chain against a Set instead of probing every other node.
+  it('dedupes a large burst without O(n^2) DOM containment work', () => {
+    const body = document.createElement('div');
+    const nodes = [];
+    for (let r = 0; r < 3; r++) {          // 3 top-level subtrees (the survivors)
+      const top = document.createElement('div');
+      body.appendChild(top); nodes.push(top);
+      for (let i = 0; i < 700; i++) {       // each with many descendants
+        const p = document.createElement('p');
+        top.appendChild(p); nodes.push(p);
+      }
+    }
+    let containsCalls = 0;
+    const orig = Node.prototype.contains;
+    Node.prototype.contains = function (...a) { containsCalls += 1; return orig.apply(this, a); };
+    let out;
+    try { out = dedupeRoots(nodes); } finally { Node.prototype.contains = orig; }
+
+    expect(out).toHaveLength(3);                 // collapses to the 3 top subtrees
+    expect(out).toEqual(nodes.filter((n) => n.parentNode === body));
+    expect(containsCalls).toBeLessThanOrEqual(nodes.length); // O(n), not O(n^2)
+  });
 });

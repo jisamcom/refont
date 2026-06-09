@@ -12,8 +12,21 @@ export function directText(el) {
 // Drop any node that is contained by another node in the same batch: scanning
 // the outermost node already walks its descendants, so scanning a descendant
 // too is redundant work. Used to coalesce a MutationObserver burst.
+//
+// A streaming page (e.g. a huge namu.wiki article) makes the observer report
+// every parsed element as its own added node — thousands per flush. The naive
+// `nodes.some(o => o.contains(n))` is O(n^2) *DOM* containment calls (~19M for
+// ~7.5k nodes ⇒ multi-second main-thread block). Instead, put the batch in a
+// Set and walk each node's ancestor chain: a node is redundant iff any ancestor
+// is also queued. That's O(n · depth) with O(1) Set lookups and zero contains().
 export function dedupeRoots(nodes) {
-  return nodes.filter((n) => !nodes.some((o) => o !== n && o.contains && o.contains(n)));
+  const queued = new Set(nodes);
+  return nodes.filter((n) => {
+    for (let p = n.parentNode; p; p = p.parentNode) {
+      if (queued.has(p)) return false;
+    }
+    return true;
+  });
 }
 
 const CODE_TAGS = new Set(['CODE', 'PRE', 'KBD', 'SAMP', 'TT']);
