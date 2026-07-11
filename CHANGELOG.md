@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.5 — 2026-07-11
+
+### 🐛 Fixes
+- track parent SPA path in opaque (about:blank/srcdoc/blob) child frames
+- catch Firefox forward pushState via href poll fallback
+- harden settings, font fetch, blocklist, and SPA handling (code review)
+
 ## v0.2.4 — 2026-06-09
 
 ### 🐛 Fixes
