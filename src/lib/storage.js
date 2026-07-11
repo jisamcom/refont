@@ -31,6 +31,87 @@ export const DEFAULTS = {
   recentFonts: { body: [], code: [] }, // recently picked fonts, per picker kind
 };
 
+const WEBFONT_DISPLAYS = new Set(['swap', 'optional', 'auto', 'block', 'fallback']);
+const FONT_SOURCES = new Set(['system', 'weburl']);
+const FONT_URL_TYPES = new Set(['css', 'file']);
+
+const isRecord = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+const finiteNumber = (v, fallback, min, max) => {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return fallback;
+  return Math.min(max, Math.max(min, v));
+};
+const boundedString = (v, fallback = '', max = 2048) => (
+  typeof v === 'string' ? v.slice(0, max) : fallback
+);
+const stringList = (v, maxItems, maxLength) => {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((x) => typeof x === 'string')
+    .map((x) => x.trim().slice(0, maxLength))
+    .filter(Boolean)
+    .slice(0, maxItems);
+};
+
+function normalizeFont(v, fallback, { nullable = false } = {}) {
+  if (nullable && v == null) return null;
+  if (!isRecord(v)) return nullable ? null : { ...fallback };
+  const source = FONT_SOURCES.has(v.source) ? v.source : fallback.source;
+  return {
+    source,
+    name: boundedString(v.name, fallback.name, 200).trim(),
+    url: source === 'weburl' ? boundedString(v.url, '', 4096).trim() || null : null,
+    urlType: FONT_URL_TYPES.has(v.urlType) ? v.urlType : fallback.urlType,
+  };
+}
+
+// Treat imported JSON, storage contents, and runtime save payloads as untrusted.
+// This keeps malformed values out of CSS template literals and prevents a bad
+// settings file from bricking the popup on its next load.
+export function normalizeSettings(input) {
+  const s = isRecord(input) ? input : {};
+  const bodyFont = normalizeFont(s.bodyFont, DEFAULTS.bodyFont);
+  if (bodyFont.source !== 'weburl' && !bodyFont.name) bodyFont.name = DEFAULTS.bodyFont.name;
+
+  const manualExclusions = {};
+  if (isRecord(s.manualExclusions)) {
+    for (const [host, selectors] of Object.entries(s.manualExclusions).slice(0, 200)) {
+      const safeHost = boundedString(host, '', 255).trim();
+      const safeSelectors = stringList(selectors, 100, 500);
+      if (safeHost && safeSelectors.length) manualExclusions[safeHost] = safeSelectors;
+    }
+  }
+
+  const recent = isRecord(s.recentFonts) ? s.recentFonts : {};
+  const weight = s.weight === 0 ? 0 : finiteNumber(s.weight, DEFAULTS.weight, 100, 900);
+  const width = s.width === 0 ? 0 : finiteNumber(s.width, DEFAULTS.width, 50, 200);
+
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    enabled: typeof s.enabled === 'boolean' ? s.enabled : DEFAULTS.enabled,
+    bodyFont,
+    webfontDisplay: WEBFONT_DISPLAYS.has(s.webfontDisplay) ? s.webfontDisplay : DEFAULTS.webfontDisplay,
+    codeFont: normalizeFont(s.codeFont, { source: 'system', name: '', url: null, urlType: 'css' }, { nullable: true }),
+    scale: finiteNumber(s.scale, DEFAULTS.scale, 0.5, 2.5),
+    minSize: finiteNumber(s.minSize, DEFAULTS.minSize, 0, 24),
+    weight,
+    width,
+    opticalSizing: s.opticalSizing === 'none' ? 'none' : 'auto',
+    preserveBold: typeof s.preserveBold === 'boolean' ? s.preserveBold : DEFAULTS.preserveBold,
+    lineHeight: finiteNumber(s.lineHeight, DEFAULTS.lineHeight, 0, 2.6),
+    letterSpacing: finiteNumber(s.letterSpacing, DEFAULTS.letterSpacing, -0.05, 0.3),
+    wordSpacing: finiteNumber(s.wordSpacing, DEFAULTS.wordSpacing, 0, 0.5),
+    axes: boundedString(s.axes, DEFAULTS.axes, 500),
+    weightFine: typeof s.weightFine === 'boolean' ? s.weightFine : DEFAULTS.weightFine,
+    blocklist: stringList(s.blocklist, 500, 500),
+    manualExclusions,
+    protectionDenylistExtra: stringList(s.protectionDenylistExtra, 200, 200),
+    recentFonts: {
+      body: stringList(recent.body, 5, 200),
+      code: stringList(recent.code, 5, 200),
+    },
+  };
+}
+
 // Merge stored settings over DEFAULTS (forward-compatible). Future schema
 // bumps add `if (prevVer < N) { ...transform... }` branches here.
 export function migrate(stored) {
@@ -51,17 +132,7 @@ export function migrate(stored) {
       base.wordSpacing = +(base.wordSpacing / PX_TO_EM_BASE).toFixed(3);
     }
   }
-  // Self-heal a missing system body-font name. An empty name made fontStack('')
-  // resolve to generic sans-serif, so it was silently FORCING sans-serif on the
-  // whole page (looked like "not applying"). This happened to anyone who saved
-  // without explicitly picking a font, or after a reset. Fall back to the same
-  // default the picker shows. (weburl sources keep their own — empty there is a
-  // separate incomplete-config case.)
-  if (base.bodyFont && base.bodyFont.source !== 'weburl' && !base.bodyFont.name) {
-    base.bodyFont = { ...base.bodyFont, name: DEFAULTS.bodyFont.name };
-  }
-  base.schemaVersion = SCHEMA_VERSION;
-  return base;
+  return normalizeSettings(base);
 }
 
 export async function getSettings() {
@@ -71,7 +142,7 @@ export async function getSettings() {
 
 export async function saveSettings(partial) {
   const current = await getSettings();
-  const next = { ...current, ...partial, schemaVersion: SCHEMA_VERSION };
+  const next = normalizeSettings({ ...current, ...(isRecord(partial) ? partial : {}) });
   await browser.storage.local.set(next);
   return next;
 }

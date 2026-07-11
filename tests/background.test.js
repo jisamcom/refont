@@ -8,7 +8,7 @@ vi.mock('webextension-polyfill', () => ({ default: {} }));
 
 import {
   guessFontMime, arrayBufferToBase64, fetchFontAsDataUrl, cssTarget,
-  classifyFontResponse, fetchFontCached, MAX_FONT_BYTES,
+  classifyFontResponse, fetchFontCached, MAX_FONT_BYTES, MAX_FONT_CACHE_ENTRIES,
 } from '../src/background.js';
 
 function fontRes(bytes, { contentType, contentLength } = {}) {
@@ -38,6 +38,7 @@ describe('guessFontMime', () => {
     expect(guessFontMime('https://x/a.ttf')).toBe('font/ttf');
     expect(guessFontMime('https://x/a.otf')).toBe('font/otf');
     expect(guessFontMime('https://x/a.xyz')).toBe('application/octet-stream');
+    expect(guessFontMime('https://x/a.woff2?v=2')).toBe('font/woff2');
   });
 });
 
@@ -71,6 +72,25 @@ describe('fetchFontAsDataUrl', () => {
     });
     await expect(fetchFontAsDataUrl('https://x/a.woff2', fakeFetch)).rejects.toThrow(/large/);
     expect(downloaded).toBe(false);
+  });
+  it('cancels a streaming response as soon as the actual size exceeds the cap', async () => {
+    let reads = 0;
+    let cancelled = false;
+    const chunk = new Uint8Array(Math.ceil(MAX_FONT_BYTES / 2) + 1);
+    const reader = {
+      read: async () => { reads += 1; return reads <= 2 ? { done: false, value: chunk } : { done: true }; },
+      cancel: async () => { cancelled = true; },
+      releaseLock: () => {},
+    };
+    const fakeFetch = async () => ({
+      ok: true, status: 200,
+      headers: new Map([['content-type', 'font/woff2']]),
+      body: { getReader: () => reader },
+      arrayBuffer: async () => { throw new Error('must stream'); },
+    });
+    await expect(fetchFontAsDataUrl('https://x/stream.woff2', fakeFetch)).rejects.toThrow(/large/);
+    expect(cancelled).toBe(true);
+    expect(reads).toBe(2);
   });
 });
 
@@ -106,5 +126,16 @@ describe('fetchFontCached', () => {
     await expect(fetchFontCached(url, flaky)).rejects.toThrow(/boom/);
     await expect(fetchFontCached(url, flaky)).resolves.toMatch(/^data:font\/woff2/);
     expect(calls).toBe(2);
+  });
+  it('evicts least-recently-used URLs instead of retaining fonts without bound', async () => {
+    const calls = new Map();
+    const fakeFetch = async (url) => {
+      calls.set(url, (calls.get(url) || 0) + 1);
+      return fontRes([1], { contentType: 'font/woff2' });
+    };
+    const urls = Array.from({ length: MAX_FONT_CACHE_ENTRIES + 1 }, (_, i) => `https://lru.test/${i}.woff2`);
+    for (const url of urls) await fetchFontCached(url, fakeFetch);
+    await fetchFontCached(urls[0], fakeFetch);
+    expect(calls.get(urls[0])).toBe(2);
   });
 });

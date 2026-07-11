@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 vi.mock('webextension-polyfill', () => ({ default: { runtime: {} } }));
+import browserMock from 'webextension-polyfill';
 import { settingsToState, stateToSettings, previewSize, mountSettingsUI } from '../src/ui/settings-ui.js';
 import { DEFAULTS } from '../src/lib/storage.js';
 
@@ -216,6 +217,22 @@ describe('live apply to current tab', () => {
     expect(previews[0].scale).toBe(1.6);
     vi.useRealTimers();
   });
+  it('attaches a rejection handler to the default tab send (receiver-less tab)', () => {
+    vi.useFakeTimers();
+    // The tab has no content script: tabs.sendMessage rejects asynchronously.
+    const rejected = { catch: vi.fn(() => rejected) };
+    browserMock.tabs = { sendMessage: vi.fn(() => rejected) };
+    const root = document.createElement('div');
+    // No previewSend → the built-in default (which calls browser.tabs.sendMessage) runs.
+    mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 9, settings: { ...DEFAULTS, scale: 1 } });
+    const rScale = root.querySelector('#rScale');
+    rScale.value = '1.4'; rScale.dispatchEvent(new Event('input'));
+    vi.advanceTimersByTime(300);
+    expect(browserMock.tabs.sendMessage).toHaveBeenCalled();
+    expect(rejected.catch).toHaveBeenCalled(); // rejection swallowed, not left unhandled
+    delete browserMock.tabs;
+    vi.useRealTimers();
+  });
   it('does not live-apply in options context', () => {
     vi.useFakeTimers();
     const previews = [];
@@ -276,5 +293,21 @@ describe('actions', () => {
     const saveMsg = sent.find((m) => m.type === 'SAVE_SETTINGS');
     expect(saveMsg).toBeTruthy();
     expect(saveMsg.payload.scale).toBe(1.4);
+  });
+  it('shows a failure state when saving rejects', async () => {
+    vi.useFakeTimers();
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1, settings: { ...DEFAULTS },
+      send: () => Promise.reject(new Error('storage unavailable')) });
+    const save = root.querySelector('#save');
+    save.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(save.textContent).toBe('저장 실패');
+    expect(save.disabled).toBe(true);
+    vi.advanceTimersByTime(1200);
+    expect(save.textContent).toBe('저장');
+    expect(save.disabled).toBe(false);
+    vi.useRealTimers();
   });
 });

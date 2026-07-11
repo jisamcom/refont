@@ -644,12 +644,23 @@ export function mountSettingsUI(root, ctx) {
 
   // Save
   const saveBtn = $('save');
-  saveBtn.addEventListener('click', () => {
-    send({ type: MSG.SAVE_SETTINGS, payload: stateToSettings(state) });
+  saveBtn.addEventListener('click', async () => {
     const orig = saveBtn.textContent;
-    saveBtn.textContent = '✓ 저장됨';
-    saveBtn.classList.add('saved');
-    setTimeout(() => { saveBtn.textContent = orig; saveBtn.classList.remove('saved'); }, 1200);
+    saveBtn.disabled = true;
+    try {
+      await send({ type: MSG.SAVE_SETTINGS, payload: stateToSettings(state) });
+      saveBtn.textContent = '✓ 저장됨';
+      saveBtn.classList.add('saved');
+    } catch {
+      saveBtn.textContent = '저장 실패';
+      saveBtn.classList.remove('saved');
+    } finally {
+      setTimeout(() => {
+        saveBtn.textContent = orig;
+        saveBtn.classList.remove('saved');
+        saveBtn.disabled = false;
+      }, 1200);
+    }
   });
 
   // Export
@@ -660,6 +671,7 @@ export function mountSettingsUI(root, ctx) {
     a.href = URL.createObjectURL(blob);
     a.download = 'refont-settings.json';
     a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 0);
   });
 
   // Import (hidden file input created dynamically)
@@ -748,8 +760,14 @@ export function mountSettingsUI(root, ctx) {
   });
 
   // ---- live apply to the current tab (debounced; popup only, transient until Save) ----
+  // tabs.sendMessage REJECTS (async) when the tab has no receiver — a restricted
+  // page, or one navigated away — so a bare try/catch (sync only) would leak an
+  // unhandled rejection. Swallow the promise too.
+  const sendTab = (msg) => {
+    try { const p = browser.tabs.sendMessage(ctx.tabId, msg); if (p && p.catch) p.catch(() => {}); } catch {}
+  };
   const previewTab = ctx.previewSend
-    || ((s) => { try { browser.tabs.sendMessage(ctx.tabId, { type: MSG.PREVIEW_SETTINGS, settings: s }); } catch {} });
+    || ((s) => sendTab({ type: MSG.PREVIEW_SETTINGS, settings: s }));
   let liveTimer;
   scheduleLiveApply = () => {
     if (!ready || ctx.context !== 'popup' || ctx.tabId == null) return;
@@ -758,7 +776,7 @@ export function mountSettingsUI(root, ctx) {
   };
   if (ctx.context === 'popup' && ctx.tabId != null && typeof window !== 'undefined' && window.addEventListener) {
     // Best-effort revert of an unsaved live preview when the popup closes.
-    window.addEventListener('pagehide', () => { try { browser.tabs.sendMessage(ctx.tabId, { type: MSG.REAPPLY }); } catch {} });
+    window.addEventListener('pagehide', () => sendTab({ type: MSG.REAPPLY }));
   }
 
   ready = true; // gate live-apply so the initial mount doesn't fire it

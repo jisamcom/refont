@@ -3,9 +3,9 @@
 // manifests, and the popup badge, and tags the release as vX.Y.Z.
 //
 // Usage:
-//   bun scripts/release.mjs 0.2.3                 # bump, test, build, package, commit, tag (no push)
-//   bun scripts/release.mjs 0.2.3 --push          # ...and push the branch + the tag
-//   bun scripts/release.mjs 0.2.3 -m "fix: ..."   # custom commit message (default: "release: v0.2.3")
+//   npm run release -- 0.2.5                 # bump, test, build, package, commit, tag (no push)
+//   npm run release -- 0.2.5 --push          # ...and push the branch + the tag
+//   npm run release -- 0.2.5 -m "fix: ..."   # custom commit message (default: "release: v0.2.5")
 //
 // Notes:
 //   - Aborts if tests fail (before touching any files) and if the tag already exists.
@@ -28,7 +28,7 @@ const mIdx = argv.findIndex((a) => a === '-m' || a === '--message');
 const message = mIdx >= 0 ? argv[mIdx + 1] : null;
 
 if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
-  console.error('Usage: bun scripts/release.mjs <X.Y.Z> [--push] [-m "msg"]');
+  console.error('Usage: npm run release -- <X.Y.Z> [--push] [-m "msg"]');
   process.exit(1);
 }
 const tag = `v${version}`;
@@ -48,12 +48,21 @@ const CMD = {
   package: useBun ? 'bun scripts/package.mjs' : 'node scripts/package.mjs',
 };
 
-// ---- preflight: clean-ish? tag free? tests green? ----
+// ---- preflight: clean branch? tag free? tests green? ----
+const dirty = cap('git status --porcelain');
+if (dirty) {
+  console.error('Working tree is not clean. Commit or stash changes before releasing.');
+  process.exit(1);
+}
 if (cap(`git tag -l ${tag}`)) {
   console.error(`Tag ${tag} already exists. Bump to a new version.`);
   process.exit(1);
 }
 const branch = cap('git rev-parse --abbrev-ref HEAD');
+if (!branch || branch === 'HEAD') {
+  console.error('Cannot release from a detached HEAD. Check out a branch first.');
+  process.exit(1);
+}
 
 console.log(`\n▶ Releasing ${tag} on ${branch}\n`);
 console.log(`▶ Running tests… (${useBun ? 'bun' : 'npm'})`);
@@ -123,7 +132,7 @@ async function createGithubRelease() {
   if (!token) {
     console.log('\nℹ GITHUB_TOKEN not set → skipping GitHub Release.');
     console.log('  Create it manually (paste dist/RELEASE_NOTES-' + tag + '.md), or rerun with:');
-    console.log(`    GITHUB_TOKEN=… bun scripts/release.mjs ${version} --push`);
+    console.log(`    GITHUB_TOKEN=… npm run release -- ${version} --push`);
     return;
   }
   const remote = cap('git remote get-url origin');

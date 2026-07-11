@@ -1,22 +1,39 @@
 // src/content.js
 import browser from 'webextension-polyfill';
 import { MSG } from './lib/messaging.js';
-import { isBlocked } from './lib/url-match.js';
+import { effectivePageUrl, isBlocked } from './lib/url-match.js';
 import {
   buildSkeletonCss, buildDynamicCss, engineVars, elementBase, ENGINE_VAR_NAMES,
   sanitizeFamilyName, sanitizeFontDisplay,
 } from './lib/engine.js';
 import { shouldProtect, hasIconClassHint, isProtectedFamily } from './lib/font-protection.js';
 import { directText, isCodeElement, dedupeRoots } from './lib/dom-utils.js';
-import { dedupeClassify } from './lib/page-fonts.js';
+import { dedupeClassify, firstFamilyToken } from './lib/page-fonts.js';
 import { getSettings } from './lib/storage.js';
 import { needsFullRescan } from './lib/apply-plan.js';
 
 let settings = null;
 let observer = null;
 let appliedCss = '';
+let applyGeneration = 0;
+const pageFontFamilies = new Map();
+const MAX_PAGE_FONT_FAMILIES = 100;
 const STATIC_STYLE_ID = '__refont_style';
 const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'HEAD', 'META', 'LINK', 'TITLE']);
+// Recomputed at each apply() (see refreshPageScope) so an SPA that changes the
+// URL via history.pushState re-evaluates the blocklist / manual exclusions
+// against the current location, not the one present at document_start.
+let pageUrl = effectivePageUrl();
+let pageHost = hostOf(pageUrl);
+
+function hostOf(url) {
+  try { return new URL(url).host; } catch { return location.host; }
+}
+
+function refreshPageScope() {
+  pageUrl = effectivePageUrl();
+  pageHost = hostOf(pageUrl);
+}
 
 // Opt-in profiling. Off by default with zero runtime cost; enable in a tab with
 //   localStorage.__refont_profile = '1'   (then reload)
@@ -56,6 +73,11 @@ function classifyElement(el) {
 
   const cs = getComputedStyle(el);
   const fontFamily = cs.fontFamily;
+  const firstFamily = firstFamilyToken(fontFamily);
+  if (firstFamily && pageFontFamilies.size < MAX_PAGE_FONT_FAMILIES) {
+    const key = firstFamily.toLowerCase();
+    if (!pageFontFamilies.has(key)) pageFontFamilies.set(key, fontFamily);
+  }
   const className = el.getAttribute('class') || '';
   const pseudoFontFamily = hasIconClassHint(className)
     ? `${pseudoFamily(el, '::before')} ${pseudoFamily(el, '::after')}`
@@ -90,9 +112,18 @@ function tagElement(plan) {
   el.setAttribute(weightBucket === 'light' ? 'data-fc-wlight' : 'data-fc-wbold', '');
 }
 
+function untagElement(el) {
+  el.removeAttribute('data-fc');
+  el.removeAttribute('data-fc-code');
+  el.removeAttribute('data-fc-size');
+  el.removeAttribute('data-fc-wlight');
+  el.removeAttribute('data-fc-wbold');
+  el.style.removeProperty('--fc-base-size');
+}
+
 function matchesManualExclusion(el) {
   const map = settings.manualExclusions || {};
-  const host = location.host;
+  const host = pageHost;
   const list = map[host] || [];
   for (const sel of list) {
     try { if (sel && el.matches(sel)) return true; } catch {}
@@ -116,25 +147,33 @@ function scan(root) {
 }
 
 function collectPageFonts() {
-  const raw = [];
-  const walker = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_ELEMENT);
-  let node = walker.currentNode.nodeType === 1 ? walker.currentNode : walker.nextNode();
-  while (node) {
-    if (!SKIP_TAGS.has(node.tagName)) {
-      const t = directText(node);
-      if (t && t.trim()) { try { raw.push(getComputedStyle(node).fontFamily); } catch {} }
-    }
-    node = walker.nextNode();
-  }
   const extra = (settings && settings.protectionDenylistExtra) || [];
-  // Don't list Refont's own applied fonts — after apply, every [data-fc] element
-  // reports the chosen body font, which would otherwise dominate the list.
-  const exclude = [];
-  if (settings) {
-    if (settings.bodyFont && settings.bodyFont.name) exclude.push(settings.bodyFont.name);
-    if (settings.codeFont && settings.codeFont.name) exclude.push(settings.codeFont.name);
-  }
-  return dedupeClassify(raw, (name) => isProtectedFamily(name, extra), 40, exclude);
+  // Families are remembered during the normal read/classification pass, before
+  // Refont writes its own font-family. Opening the popup is therefore O(unique
+  // families), not another synchronous full-DOM getComputedStyle sweep.
+  //
+  // When Refont is inactive on the page (disabled or blocklisted) that pass
+  // never ran, so the cache is empty. Fall back to a one-shot live DOM walk so
+  // the popup can still list the page's fonts — and since nothing was applied,
+  // no Refont font can pollute the reading.
+  const families = pageFontFamilies.size ? [...pageFontFamilies.values()] : livePageFamilies();
+  return dedupeClassify(families, (name) => isProtectedFamily(name, extra), 40);
+}
+
+function livePageFamilies() {
+  const raw = [];
+  try {
+    const walker = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_ELEMENT);
+    let node = walker.currentNode.nodeType === 1 ? walker.currentNode : walker.nextNode();
+    while (node) {
+      if (!SKIP_TAGS.has(node.tagName)) {
+        const t = directText(node);
+        if (t && t.trim()) { try { raw.push(getComputedStyle(node).fontFamily); } catch {} }
+      }
+      node = walker.nextNode();
+    }
+  } catch {}
+  return raw;
 }
 
 // ---- batched mutation handling ----
@@ -143,26 +182,75 @@ function collectPageFonts() {
 // script into the initiator stack of any resource the forced layout flushes
 // (e.g. a page's own lazy <img>). Coalesce a burst into one rAF flush instead.
 let pendingRoots = new Set();
+let pendingReclassify = new Set();
+let pendingAttrTargets = new Set();
 let flushScheduled = false;
 const schedule = (cb) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(cb) : setTimeout(cb, 16));
+
+function clearPending() { pendingRoots.clear(); pendingReclassify.clear(); pendingAttrTargets.clear(); }
 
 function scheduleFlush() {
   if (flushScheduled) return;
   flushScheduled = true;
   schedule(() => {
     flushScheduled = false;
-    if (!observer) { pendingRoots.clear(); return; } // torn down before the flush ran
+    if (!observer) { clearPending(); return; } // torn down before the flush ran
     const roots = [...pendingRoots];
-    pendingRoots.clear();
+    const reclassify = new Set(pendingReclassify);
+    const attrTargets = [...pendingAttrTargets];
+    clearPending();
+    // A class/style change on an element can restyle its descendants through a
+    // descendant selector (`.dark .child{…}`) or an inherited font property, with
+    // NO mutation firing on those descendants. So expand each attribute target to
+    // the text-bearing elements in its subtree — the only ones classifyElement
+    // acts on — and re-evaluate them too. (Text/characterData changes touch only
+    // their own element, so those stay single-element in `reclassify`.)
+    for (const el of attrTargets) collectTextOwners(el, reclassify);
     const deduped = dedupeRoots(roots);
     // Named (not an arrow) so it shows up distinctly in a stack trace — lets us
     // tell which scan path is the initiator of any forced-layout resource load.
-    profile('mutation-flush', `roots=${roots.length}->${deduped.length}`, function scanMutations() {
+    profile('mutation-flush', `roots=${deduped.length} recls=${reclassify.size}`, function scanMutations() {
       for (const node of deduped) {
         if (node.isConnected !== false) scan(node);
       }
+      reclassifyElements([...reclassify]);
     });
   });
+}
+
+// Collect every element that owns direct (non-whitespace) text within `root`'s
+// subtree — inclusive of `root` itself. Walking SHOW_TEXT (not SHOW_ELEMENT)
+// visits only the nodes that matter to classification, skipping the structural
+// elements classifyElement would reject anyway.
+function collectTextOwners(root, out) {
+  if (!root || root.isConnected === false) return;
+  try {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (n.data && n.data.trim() && n.parentElement) out.add(n.parentElement);
+    }
+  } catch {}
+}
+
+// Re-evaluate elements whose classification may have changed. Untag first
+// (write), then read+plan, then re-tag — the same no-layout-thrash discipline as
+// scan(): all removals precede all reads, all reads precede all writes.
+function reclassifyElements(els) {
+  const live = els.filter((el) => el.isConnected !== false);
+  if (!live.length) return;
+  // Drop our marks so the read pass sees the page's current author font, not
+  // Refont's override.
+  for (const el of live) if (el.hasAttribute('data-fc')) untagElement(el);
+  const plans = [];
+  for (const el of live) { const plan = classifyElement(el); if (plan) plans.push(plan); }
+  for (const plan of plans) tagElement(plan);
+}
+
+function stripRefontStyle(cssText) {
+  return String(cssText || '')
+    .replace(/--(?:fc-base-size|refont-[\w-]+)\s*:[^;]*(?:;|$)/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function startObserver() {
@@ -173,21 +261,32 @@ function startObserver() {
         // A *text node* added to an existing element (the common ExtJS/jQuery
         // pattern: create an empty element, then fill it via textContent/innerHTML
         // /appendChild). That's a childList mutation, not characterData, and the
-        // element was likely scanned-and-skipped while still empty — so re-scan
-        // the target now that it holds direct text.
-        else if (n.nodeType === 3 && m.target && m.target.nodeType === 1) pendingRoots.add(m.target);
+        // element was likely scanned-and-skipped while still empty — so re-evaluate
+        // just that element now that it holds direct text.
+        else if (n.nodeType === 3 && m.target && m.target.nodeType === 1) pendingReclassify.add(m.target);
       }
-      if (m.type === 'characterData' && m.target.parentElement) pendingRoots.add(m.target.parentElement);
+      // A text change affects only the target element's own classification.
+      if (m.type === 'characterData' && m.target.parentElement) pendingReclassify.add(m.target.parentElement);
+      // A class/style change can also restyle descendants (descendant selectors,
+      // inheritance), so it's expanded to its text-bearing subtree at flush time.
+      if (m.type === 'attributes') {
+        // Ignore style records caused solely by Refont's own custom properties;
+        // otherwise setVars()/tagElement() would schedule an endless re-scan.
+        if (m.attributeName === 'style'
+          && stripRefontStyle(m.oldValue) === stripRefontStyle(m.target.getAttribute('style'))) continue;
+        pendingAttrTargets.add(m.target);
+      }
     }
-    if (pendingRoots.size) scheduleFlush();
+    if (pendingRoots.size || pendingReclassify.size || pendingAttrTargets.size) scheduleFlush();
   });
   observer.observe(document.documentElement, {
     childList: true, subtree: true, characterData: true,
+    attributes: true, attributeOldValue: true, attributeFilter: ['class', 'style'],
   });
 }
 
-async function injectWebFont() {
-  const bf = settings.bodyFont;
+async function injectWebFont(nextSettings, generation) {
+  const bf = nextSettings.bodyFont;
   if (!bf || bf.source !== 'weburl' || !bf.url) return;
   let parsed;
   try { parsed = new URL(bf.url); } catch { return; }
@@ -202,12 +301,14 @@ async function injectWebFont() {
   } else {
     try {
       const dataUrl = await browser.runtime.sendMessage({ type: MSG.FETCH_FONT, url: bf.url });
-      const display = sanitizeFontDisplay(settings.webfontDisplay);
+      if (generation !== applyGeneration) return;
+      const display = sanitizeFontDisplay(nextSettings.webfontDisplay);
       style.textContent = `@font-face{font-family:"${sanitizeFamilyName(bf.name)}";src:url(${dataUrl});font-display:${display};}`;
     } catch { return; }
   }
+  if (generation !== applyGeneration) return;
   (document.head || document.documentElement).appendChild(style);
-  warmFonts();
+  warmFonts(nextSettings);
 }
 
 // CSS Font Loading API: proactively trigger a download of the chosen families so
@@ -222,12 +323,12 @@ async function injectWebFont() {
 // document.fonts.load() right after the @font-face is injected forces that face
 // to decode immediately (the file path is an inlined data: URL, so it's ready
 // almost at once), so the chosen font actually shows instead of being dropped.
-function warmFonts() {
+function warmFonts(nextSettings = settings) {
   try {
-    if (!settings || !document.fonts || !document.fonts.load) return;
+    if (!nextSettings || !document.fonts || !document.fonts.load) return;
     const names = [];
-    if (settings.bodyFont && settings.bodyFont.name) names.push(settings.bodyFont.name);
-    if (settings.codeFont && settings.codeFont.name) names.push(settings.codeFont.name);
+    if (nextSettings.bodyFont && nextSettings.bodyFont.name) names.push(nextSettings.bodyFont.name);
+    if (nextSettings.codeFont && nextSettings.codeFont.name) names.push(nextSettings.codeFont.name);
     for (const n of names) {
       const fam = sanitizeFamilyName(n);
       if (fam) document.fonts.load(`1em "${fam}"`).catch(() => {});
@@ -239,14 +340,7 @@ function warmFonts() {
 // --fc-base-size custom property, this fully reverts the page — the author's own
 // inline font-size/font-weight were never modified.
 function clearMarks() {
-  for (const el of document.querySelectorAll('[data-fc]')) {
-    el.removeAttribute('data-fc');
-    el.removeAttribute('data-fc-code');
-    el.removeAttribute('data-fc-size');
-    el.removeAttribute('data-fc-wlight');
-    el.removeAttribute('data-fc-wbold');
-    el.style.removeProperty('--fc-base-size');
-  }
+  for (const el of document.querySelectorAll('[data-fc]')) untagElement(el);
 }
 
 // ---- engine variables (live values driven through CSS custom properties) ----
@@ -301,7 +395,8 @@ function buildSheet(s) {
 // variables and stylesheets/web font.
 function teardown() {
   if (observer) { observer.disconnect(); observer = null; }
-  pendingRoots.clear();
+  clearPending();
+  pageFontFamilies.clear();
   flushScheduled = false;
   clearMarks();
   clearVars();
@@ -312,9 +407,9 @@ function teardown() {
 
 // Full path: re-tag the document. Used on first run and whenever a change can
 // alter *which* elements get tagged (see needsFullRescan).
-function applyFull(next) {
+function applyFull(next, generation) {
   settings = next;
-  const active = settings.enabled && !isBlocked(location.href, settings.blocklist);
+  const active = settings.enabled && !isBlocked(pageUrl, settings.blocklist);
   teardown();
   if (!active) return;
 
@@ -324,8 +419,8 @@ function applyFull(next) {
   // --- fast path (synchronous): the rule sheet, the variables and the first
   // tagged elements land before the browser paints — no flash of the original. ---
   injectStaticStyle(appliedCss);
-  injectWebFont().catch(() => {}); // @import/@font-face style appends synchronously (warms its own font)
-  warmFonts();                     // system-font path: kick off the load too
+  injectWebFont(settings, generation).catch(() => {}); // async file fetch is generation-guarded
+  warmFonts(settings);             // system-font path: kick off the load too
   startObserver();                 // catches nodes as the parser streams them in
   profile('full-scan', null, function scanInitial() { scan(document.documentElement); });
 
@@ -358,30 +453,70 @@ function applyValues(next) {
 // override: transient settings (live preview) that are applied but NOT persisted.
 // When omitted, settings are read straight from storage.local — no service-worker
 // wake-up — so the first paint isn't gated on a cold MV3 worker round-trip.
-async function apply(override) {
+async function apply(override, { full = false } = {}) {
+  const generation = ++applyGeneration;
+  refreshPageScope();
   const next = override || await getSettings();
-  if (needsFullRescan(settings, next) || !appliedCss) {
-    applyFull(next);
+  if (generation !== applyGeneration) return;
+  if (full || needsFullRescan(settings, next) || !appliedCss) {
+    applyFull(next, generation);
   } else {
     applyValues(next);
   }
 }
 
+// True when Refont should be applied to the current URL. `observer` is live iff
+// we are currently applied, so it doubles as "was active".
+function isActiveFor(s) { return !!s && s.enabled && !isBlocked(pageUrl, s.blocklist); }
+
+// A same-document SPA navigation (pushState/replaceState/back-forward) changes
+// the URL without re-running the content script, so a path-scoped blocklist entry
+// would otherwise never re-evaluate. Recompute the scope and, only when the
+// blocked/active state actually flips, force a full re-apply (or teardown). A
+// benign in-app route change that doesn't cross a blocklist boundary does no work
+// beyond recomputing the URL.
+let navScheduled = false;
+function onNavigation() {
+  if (navScheduled) return;
+  navScheduled = true;
+  schedule(() => {
+    navScheduled = false;
+    refreshPageScope(); // read the URL after the navigation has committed
+    if (isActiveFor(settings) === !!observer) return; // block-state unchanged
+    apply(undefined, { full: true }).catch(() => {});
+  });
+}
+
 browser.runtime.onMessage.addListener((msg) => {
   if (!msg) return undefined;
-  if (msg.type === MSG.REAPPLY) { apply(); return undefined; }
-  if (msg.type === MSG.PREVIEW_SETTINGS) { apply(msg.settings); return undefined; }
+  // Fire-and-forget: returning the apply() promise would hold the message
+  // channel open in every frame (all_frames) and emit "channel closed" noise;
+  // REAPPLY/PREVIEW have no response the sender awaits.
+  if (msg.type === MSG.REAPPLY) { apply().catch(() => {}); return undefined; }
+  if (msg.type === MSG.PREVIEW_SETTINGS) { apply(msg.settings).catch(() => {}); return undefined; }
   if (msg.type === MSG.GET_PAGE_FONTS) return Promise.resolve(collectPageFonts());
   return undefined;
 });
 
 apply().catch(() => {});
 
+// SPA navigation triggers (permission-free; no webNavigation). popstate covers
+// back/forward everywhere; the Navigation API's `navigate` covers pushState/
+// replaceState where supported (Chromium). Both are feature-detected.
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('popstate', onNavigation, { passive: true });
+  try {
+    if (window.navigation && window.navigation.addEventListener) {
+      window.navigation.addEventListener('navigate', onNavigation);
+    }
+  } catch {}
+}
+
 // Safety net: if settings resolved late and the parser had already emitted most
 // of the document before the observer was live, re-tag once the DOM is complete.
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', function scanLate() {
-    if (settings && settings.enabled && !isBlocked(location.href, settings.blocklist)) {
+    if (settings && settings.enabled && !isBlocked(pageUrl, settings.blocklist)) {
       scan(document.documentElement);
     }
   }, { once: true });

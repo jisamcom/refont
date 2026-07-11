@@ -165,4 +165,130 @@ describe('content var-engine', () => {
     expect(document.getElementById('i').getAttribute('data-fc')).toBe('');
     expect(document.getElementById('i').style.getPropertyValue('--fc-base-size')).toBe('12px');
   });
+
+  it('reclassifies a tagged SPA element when it becomes an icon', async () => {
+    document.body.innerHTML = '<span id="mutable">normal text</span>';
+    await freshApply(makeSettings());
+    const el = document.getElementById('mutable');
+    expect(el.hasAttribute('data-fc')).toBe(true);
+
+    el.className = 'new-icon-role';
+    el.style.fontFamily = 'Material Icons';
+    el.textContent = 'menu';
+    await tick();
+    await tick();
+    expect(el.hasAttribute('data-fc')).toBe(false);
+  });
+
+  it('ignores observer records caused only by Refont custom properties', async () => {
+    document.body.innerHTML = '<p id="t">hello</p>';
+    await freshApply(makeSettings());
+    const el = document.getElementById('t');
+    expect(el.hasAttribute('data-fc')).toBe(true);
+    await tick();
+    expect(el.hasAttribute('data-fc')).toBe(true);
+  });
+
+  it('does not append a stale web font after a newer apply wins', async () => {
+    let resolveOld;
+    let fetchCount = 0;
+    fakeBrowser.runtime.sendMessage.mockImplementation(async (m) => {
+      if (!m || m.type !== MSG.FETCH_FONT) return {};
+      fetchCount += 1;
+      if (fetchCount === 1) return new Promise((resolve) => { resolveOld = resolve; });
+      return 'data:font/woff2;base64,NEW';
+    });
+    const oldSettings = makeSettings({
+      bodyFont: { source: 'weburl', name: 'Race Font', url: 'https://x/old.woff2', urlType: 'file' },
+    });
+    const newSettings = makeSettings({
+      bodyFont: { source: 'weburl', name: 'Race Font', url: 'https://x/new.woff2', urlType: 'file' },
+    });
+
+    await freshApply(oldSettings);
+    await preview(newSettings);
+    await tick();
+    expect(document.querySelectorAll('#__refont_webfont')).toHaveLength(1);
+    expect(document.getElementById('__refont_webfont').textContent).toContain('base64,NEW');
+
+    resolveOld('data:font/woff2;base64,OLD');
+    await tick();
+    expect(document.querySelectorAll('#__refont_webfont')).toHaveLength(1);
+    expect(document.getElementById('__refont_webfont').textContent).not.toContain('base64,OLD');
+    fakeBrowser.runtime.sendMessage.mockImplementation(async () => ({}));
+  });
+
+  it('serves page-font metadata from the classification cache', async () => {
+    document.body.innerHTML = '<p style="font-family:Georgia">body</p><span style="font-family:FontAwesome">icon</span>';
+    await freshApply(makeSettings());
+    const fonts = await messageListener({ type: MSG.GET_PAGE_FONTS });
+    expect(fonts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Georgia', protected: false }),
+      expect.objectContaining({ name: 'FontAwesome', protected: true }),
+    ]));
+  });
+
+  it('still lists page fonts when Refont is inactive (disabled) via a live DOM fallback', async () => {
+    document.body.innerHTML = '<p style="font-family:Georgia">body</p>';
+    // Disabled → no classification pass runs, so the cache is empty. The popup
+    // must still be able to show the page's fonts.
+    await reapply(makeSettings({ enabled: false }));
+    const fonts = await messageListener({ type: MSG.GET_PAGE_FONTS });
+    expect(fonts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Georgia' }),
+    ]));
+  });
+
+  it('re-evaluates text-bearing descendants when a container attribute changes (descendant-selector safety)', async () => {
+    // A descendant selector like `.dark #child { font-family: "Material Icons" }`
+    // restyles the child through the PARENT's class alone — no mutation fires on
+    // the child. Refont must re-read the child so a child that becomes an icon
+    // isn't left tagged (and clobbered by the !important body-font rule).
+    document.body.innerHTML = '<div id="c"><span id="child" style="font-size:12px">text</span></div>';
+    await freshApply(makeSettings());
+    expect(document.getElementById('child').hasAttribute('data-fc')).toBe(true);
+
+    const spy = vi.spyOn(globalThis, 'getComputedStyle');
+    document.getElementById('c').className = 'dark'; // parent attr change only
+    await tick();
+    await tick();
+    const readChild = spy.mock.calls.some((c) => c[0] && c[0].id === 'child');
+    expect(readChild).toBe(true);
+    spy.mockRestore();
+  });
+
+  it('re-evaluates the blocklist against the current URL on reapply (SPA navigation)', async () => {
+    document.body.innerHTML = '<p id="t">hi</p>';
+    history.replaceState({}, '', '/');
+    await freshApply(makeSettings({ blocklist: [] }));
+    expect(document.getElementById('t').hasAttribute('data-fc')).toBe(true);
+
+    // SPA route change to a path that a new blocklist entry covers.
+    history.replaceState({}, '', '/app/blocked');
+    await reapply(makeSettings({ blocklist: ['localhost/app/blocked'] }));
+    expect(document.getElementById('t').hasAttribute('data-fc')).toBe(false);
+    history.replaceState({}, '', '/');
+  });
+
+  it('reverts on a real SPA navigation into a blocked path (popstate, no settings change)', async () => {
+    document.body.innerHTML = '<p id="t">hi</p>';
+    history.replaceState({}, '', '/');
+    await freshApply(makeSettings({ blocklist: ['localhost/members'] }));
+    expect(document.getElementById('t').hasAttribute('data-fc')).toBe(true);
+
+    // Route change with NO save/preview/reload — only a navigation event fires.
+    history.replaceState({}, '', '/members');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await tick();
+    await tick();
+    expect(document.getElementById('t').hasAttribute('data-fc')).toBe(false);
+    history.replaceState({}, '', '/');
+  });
+
+  it('does not return a response promise for REAPPLY (no dangling message channel)', async () => {
+    currentSettings = makeSettings();
+    const ret = messageListener({ type: MSG.REAPPLY });
+    expect(ret).toBeUndefined();
+    await tick();
+  });
 });

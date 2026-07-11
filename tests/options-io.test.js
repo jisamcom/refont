@@ -33,4 +33,13 @@ describe('settings import/export', () => {
     expect(() => parseSettings('5')).toThrow();
     expect(() => parseSettings('[1,2]')).toThrow();
   });
+  it('rejects CSS-like strings in numeric fields by restoring safe defaults', () => {
+    const parsed = parseSettings(JSON.stringify({
+      schemaVersion: 4,
+      letterSpacing: '0;} html{display:none}/*',
+      lineHeight: '2; color:red',
+    }));
+    expect(parsed.letterSpacing).toBe(DEFAULTS.letterSpacing);
+    expect(parsed.lineHeight).toBe(DEFAULTS.lineHeight);
+  });
 });

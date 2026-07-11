@@ -5,7 +5,8 @@ import { getSettings, saveSettings } from './lib/storage.js';
 import { isBlocked } from './lib/url-match.js';
 
 export function guessFontMime(url) {
-  const u = String(url).toLowerCase();
+  let u = String(url).toLowerCase();
+  try { u = new URL(u).pathname.toLowerCase(); } catch { u = u.split(/[?#]/)[0]; }
   if (u.endsWith('.woff2')) return 'font/woff2';
   if (u.endsWith('.woff')) return 'font/woff';
   if (u.endsWith('.ttf')) return 'font/ttf';
@@ -50,10 +51,44 @@ export async function fetchFontAsDataUrl(url, fetchFn = fetch) {
   if (!res.ok) throw new Error(`font fetch failed: ${res.status}`);
   const declared = Number(header(res, 'content-length'));
   if (declared > MAX_FONT_BYTES) throw new Error(`font too large: ${declared} bytes`);
-  const buf = await res.arrayBuffer();
-  const verdict = classifyFontResponse({ url, contentType: header(res, 'content-type'), byteLength: buf.byteLength });
+  const contentType = header(res, 'content-type');
+  const earlyVerdict = classifyFontResponse({ url, contentType, byteLength: Number.isFinite(declared) ? declared : null });
+  if (earlyVerdict === 'not-font') throw new Error('rejected font response: not-font');
+  const buf = await readResponseLimited(res, MAX_FONT_BYTES);
+  const verdict = classifyFontResponse({ url, contentType, byteLength: buf.byteLength });
   if (verdict !== 'ok') throw new Error(`rejected font response: ${verdict}`);
   return `data:${guessFontMime(url)};base64,${arrayBufferToBase64(buf)}`;
+}
+
+async function readResponseLimited(res, maxBytes) {
+  const reader = res.body && typeof res.body.getReader === 'function' ? res.body.getReader() : null;
+  if (!reader) {
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength > maxBytes) throw new Error(`font too large: ${buf.byteLength} bytes`);
+    return buf;
+  }
+
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+      total += chunk.byteLength;
+      if (total > maxBytes) {
+        try { await reader.cancel('font too large'); } catch {}
+        throw new Error(`font too large: more than ${maxBytes} bytes`);
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.byteLength; }
+  return merged.buffer;
 }
 
 // One fetch per URL per service-worker lifetime. With all_frames:true a page of
@@ -61,10 +96,20 @@ export async function fetchFontAsDataUrl(url, fetchFn = fetch) {
 // font. In-flight requests share the same promise; failures are evicted so a
 // transient error doesn't poison the URL.
 const fontCache = new Map();
+export const MAX_FONT_CACHE_ENTRIES = 4;
 export function fetchFontCached(url, fetchFn = fetch) {
-  if (fontCache.has(url)) return fontCache.get(url);
-  const p = fetchFontAsDataUrl(url, fetchFn).catch((e) => { fontCache.delete(url); throw e; });
+  if (fontCache.has(url)) {
+    const cached = fontCache.get(url);
+    fontCache.delete(url);
+    fontCache.set(url, cached);
+    return cached;
+  }
+  const p = fetchFontAsDataUrl(url, fetchFn).catch((e) => {
+    if (fontCache.get(url) === p) fontCache.delete(url);
+    throw e;
+  });
   fontCache.set(url, p);
+  while (fontCache.size > MAX_FONT_CACHE_ENTRIES) fontCache.delete(fontCache.keys().next().value);
   return p;
 }
 

@@ -14,7 +14,7 @@ vi.mock('webextension-polyfill', () => ({
   },
 }));
 
-import { DEFAULTS, SCHEMA_VERSION, migrate, getSettings, saveSettings } from '../src/lib/storage.js';
+import { DEFAULTS, SCHEMA_VERSION, migrate, normalizeSettings, getSettings, saveSettings } from '../src/lib/storage.js';
 
 beforeEach(() => { store.data = {}; });
 
@@ -94,5 +94,28 @@ describe('body-font self-heal', () => {
     expect(migrate({ bodyFont: { source: 'system', name: 'Georgia' } }).bodyFont.name).toBe('Georgia');
     const web = migrate({ bodyFont: { source: 'weburl', name: '', url: 'https://x/f.css', urlType: 'css' } });
     expect(web.bodyFont.name).toBe(''); // weburl empty left as-is
+  });
+});
+
+describe('settings validation', () => {
+  it('drops wrong types and clamps numeric controls to supported ranges', () => {
+    const s = normalizeSettings({
+      scale: 99,
+      minSize: -4,
+      letterSpacing: '0;} html{display:none}/*',
+      blocklist: [' example.com ', 42],
+      recentFonts: { body: 'not-an-array' },
+    });
+    expect(s.scale).toBe(2.5);
+    expect(s.minSize).toBe(0);
+    expect(s.letterSpacing).toBe(0);
+    expect(s.blocklist).toEqual(['example.com']);
+    expect(s.recentFonts.body).toEqual([]);
+  });
+
+  it('normalizes partial saves before persisting them', async () => {
+    await saveSettings({ letterSpacing: 'bad-css', width: 999 });
+    expect(store.data.letterSpacing).toBe(0);
+    expect(store.data.width).toBe(200);
   });
 });
