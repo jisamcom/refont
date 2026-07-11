@@ -476,14 +476,11 @@ function isActiveFor(s) { return !!s && s.enabled && !isBlocked(pageUrl, s.block
 // benign in-app route change that doesn't cross a blocklist boundary does no work
 // beyond recomputing the URL.
 let navScheduled = false;
-let lastNavHref = safeHref();
-function safeHref() { try { return String(location.href || ''); } catch { return ''; } }
 function onNavigation() {
   if (navScheduled) return;
   navScheduled = true;
   schedule(() => {
     navScheduled = false;
-    lastNavHref = safeHref();
     refreshPageScope(); // read the URL after the navigation has committed
     if (isActiveFor(settings) === !!observer) return; // block-state unchanged
     apply(undefined, { full: true }).catch(() => {});
@@ -504,19 +501,23 @@ browser.runtime.onMessage.addListener((msg) => {
 apply().catch(() => {});
 
 // SPA navigation triggers (permission-free; no webNavigation). popstate covers
-// back/forward everywhere. For pushState/replaceState: the Navigation API's
-// `navigate` event (Chromium) is immediate; where it's absent (Firefox), fall
-// back to a low-frequency href poll — the only signal that also works while
-// Refont is inactive (no observer/mutation flush is running then). Both branches
-// funnel through onNavigation, which no-ops unless the block state actually flips.
+// back/forward everywhere. For pushState/replaceState the Navigation API's
+// `navigate` event (Chromium) is immediate. A low-frequency effective-URL poll
+// is the fallback, needed in two cases the events miss: (1) Firefox, which has no
+// Navigation API, and (2) an opaque (about:blank/srcdoc) child frame, whose own
+// events never fire for a *parent* SPA navigation — only re-reading the inherited
+// ancestor URL sees it. Comparing effectivePageUrl() (not location.href) is what
+// makes the parent-frame case work. All paths funnel through onNavigation, which
+// no-ops unless the block state actually flips.
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('popstate', onNavigation, { passive: true });
   let navApi = null;
   try { navApi = window.navigation && window.navigation.addEventListener ? window.navigation : null; } catch {}
-  if (navApi) {
-    navApi.addEventListener('navigate', onNavigation);
-  } else {
-    setInterval(() => { if (safeHref() !== lastNavHref) onNavigation(); }, 1000);
+  if (navApi) navApi.addEventListener('navigate', onNavigation);
+  let opaqueFrame = false;
+  try { opaqueFrame = !/^https?:$/.test(location.protocol); } catch {}
+  if (!navApi || opaqueFrame) {
+    setInterval(() => { if (effectivePageUrl() !== pageUrl) onNavigation(); }, 1000);
   }
 }
 

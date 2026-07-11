@@ -20,13 +20,41 @@ function parseEntry(raw) {
   } catch { return null; }
 }
 
-export function effectivePageUrl(loc = globalThis.location, doc = globalThis.document) {
+// The nearest same-origin ancestor frame's full URL, or '' if none is reachable.
+// about:blank/srcdoc frames inherit the embedder's origin, so parent/top are
+// same-origin and readable; a cross-origin ancestor throws and is skipped. The
+// full URL (path included) is what makes path-scoped rules work in opaque frames
+// and lets them observe a parent SPA route change.
+function sameOriginAncestorHref(win) {
+  if (!win) return '';
+  for (const key of ['parent', 'top']) {
+    try {
+      const w = win[key];
+      if (w && w !== win) {
+        const h = String(w.location.href || ''); // throws for a cross-origin ancestor
+        if (/^https?:\/\//i.test(h)) return h;
+      }
+    } catch {}
+  }
+  return '';
+}
+
+export function effectivePageUrl(loc = globalThis.location, doc = globalThis.document, win = globalThis) {
   const href = String((loc && loc.href) || '');
+  let blobOrigin = '';
   try {
     const u = new URL(href);
     if (/^https?:$/.test(u.protocol)) return u.href;
-    if (u.protocol === 'blob:' && u.origin && u.origin !== 'null') return u.origin;
+    if (u.protocol === 'blob:' && u.origin && u.origin !== 'null') blobOrigin = u.origin;
   } catch {}
+
+  // Opaque frame (about:blank / srcdoc / blob): prefer a same-origin ancestor's
+  // full URL (path included) so path-scoped rules match and a parent SPA route
+  // change is observable. A blob's own creator origin is the next-best value —
+  // ahead of the origin-only ancestorOrigins/referrer fallbacks below.
+  const inherited = sameOriginAncestorHref(win);
+  if (inherited) return inherited;
+  if (blobOrigin) return blobOrigin;
 
   try {
     const origins = loc && loc.ancestorOrigins;

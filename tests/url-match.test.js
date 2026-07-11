@@ -41,13 +41,28 @@ describe('effectivePageUrl', () => {
   it('keeps normal web URLs', () => {
     expect(effectivePageUrl({ href: 'https://example.com/a' }, {})).toBe('https://example.com/a');
   });
-  it('uses the parent origin/referrer for inherited-origin blank frames', () => {
-    expect(effectivePageUrl({ href: 'about:blank', ancestorOrigins: ['https://parent.example'] }, {}))
+  it('uses a same-origin ancestor full URL (with path) for inherited-origin blank frames', () => {
+    const win = {}; win.parent = { location: { href: 'https://parent.example/admin/panel' } }; win.top = win.parent;
+    expect(effectivePageUrl({ href: 'about:blank' }, {}, win)).toBe('https://parent.example/admin/panel');
+    expect(effectivePageUrl({ href: 'about:srcdoc' }, {}, win)).toBe('https://parent.example/admin/panel');
+  });
+  it('falls back to parent origin/referrer when the ancestor is cross-origin', () => {
+    const win = {}; win.parent = { get location() { throw new Error('cross-origin'); } }; win.top = win.parent;
+    expect(effectivePageUrl({ href: 'about:blank', ancestorOrigins: ['https://parent.example'] }, {}, win))
       .toBe('https://parent.example');
-    expect(effectivePageUrl({ href: 'about:srcdoc' }, { referrer: 'https://parent.example/page' }))
+    expect(effectivePageUrl({ href: 'about:srcdoc' }, { referrer: 'https://parent.example/page' }, win))
       .toBe('https://parent.example/page');
   });
   it('extracts the creator origin from blob URLs', () => {
     expect(effectivePageUrl({ href: 'blob:https://example.com/id' }, {})).toBe('https://example.com');
+  });
+  it('prefers a same-origin ancestor full URL over the blob creator origin', () => {
+    const win = {}; win.parent = { location: { href: 'https://example.com/admin/panel' } }; win.top = win.parent;
+    expect(effectivePageUrl({ href: 'blob:https://example.com/id' }, {}, win))
+      .toBe('https://example.com/admin/panel');
+  });
+  it('falls back to the blob creator origin when no ancestor is reachable', () => {
+    const win = {}; win.parent = { get location() { throw new Error('cross-origin'); } }; win.top = win.parent;
+    expect(effectivePageUrl({ href: 'blob:https://example.com/id' }, {}, win)).toBe('https://example.com');
   });
 });
