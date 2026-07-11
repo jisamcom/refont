@@ -476,11 +476,14 @@ function isActiveFor(s) { return !!s && s.enabled && !isBlocked(pageUrl, s.block
 // benign in-app route change that doesn't cross a blocklist boundary does no work
 // beyond recomputing the URL.
 let navScheduled = false;
+let lastNavHref = safeHref();
+function safeHref() { try { return String(location.href || ''); } catch { return ''; } }
 function onNavigation() {
   if (navScheduled) return;
   navScheduled = true;
   schedule(() => {
     navScheduled = false;
+    lastNavHref = safeHref();
     refreshPageScope(); // read the URL after the navigation has committed
     if (isActiveFor(settings) === !!observer) return; // block-state unchanged
     apply(undefined, { full: true }).catch(() => {});
@@ -501,15 +504,20 @@ browser.runtime.onMessage.addListener((msg) => {
 apply().catch(() => {});
 
 // SPA navigation triggers (permission-free; no webNavigation). popstate covers
-// back/forward everywhere; the Navigation API's `navigate` covers pushState/
-// replaceState where supported (Chromium). Both are feature-detected.
+// back/forward everywhere. For pushState/replaceState: the Navigation API's
+// `navigate` event (Chromium) is immediate; where it's absent (Firefox), fall
+// back to a low-frequency href poll — the only signal that also works while
+// Refont is inactive (no observer/mutation flush is running then). Both branches
+// funnel through onNavigation, which no-ops unless the block state actually flips.
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('popstate', onNavigation, { passive: true });
-  try {
-    if (window.navigation && window.navigation.addEventListener) {
-      window.navigation.addEventListener('navigate', onNavigation);
-    }
-  } catch {}
+  let navApi = null;
+  try { navApi = window.navigation && window.navigation.addEventListener ? window.navigation : null; } catch {}
+  if (navApi) {
+    navApi.addEventListener('navigate', onNavigation);
+  } else {
+    setInterval(() => { if (safeHref() !== lastNavHref) onNavigation(); }, 1000);
+  }
 }
 
 // Safety net: if settings resolved late and the parser had already emitted most

@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 // that the author's own inline font props are never modified.
 
 let messageListener = null;
+let navigateListener = null; // captured from the mocked Navigation API at import
 const fakeBrowser = {
   runtime: {
     onMessage: { addListener: (fn) => { messageListener = fn; } },
@@ -51,6 +52,11 @@ const sheetText = () => (document.getElementById('__refont_style') || {}).textCo
 
 beforeAll(async () => {
   globalThis.requestAnimationFrame = (cb) => { cb(); return 0; };
+  // Present a Navigation API so content.js takes the Chromium event path (and
+  // skips the Firefox href-poll interval, which would dangle in the test env).
+  try {
+    window.navigation = { addEventListener: (type, fn) => { if (type === 'navigate') navigateListener = fn; } };
+  } catch {}
   currentSettings = makeSettings();
   await import('../src/content.js');
   await tick();
@@ -266,6 +272,22 @@ describe('content var-engine', () => {
     // SPA route change to a path that a new blocklist entry covers.
     history.replaceState({}, '', '/app/blocked');
     await reapply(makeSettings({ blocklist: ['localhost/app/blocked'] }));
+    expect(document.getElementById('t').hasAttribute('data-fc')).toBe(false);
+    history.replaceState({}, '', '/');
+  });
+
+  it('reverts on a Chromium Navigation API navigate event (pushState, no popstate)', async () => {
+    expect(typeof navigateListener).toBe('function'); // wired at import from window.navigation
+    document.body.innerHTML = '<p id="t">hi</p>';
+    history.replaceState({}, '', '/');
+    await freshApply(makeSettings({ blocklist: ['localhost/admin'] }));
+    expect(document.getElementById('t').hasAttribute('data-fc')).toBe(true);
+
+    // pushState-style navigation fires `navigate`, not popstate.
+    history.replaceState({}, '', '/admin');
+    navigateListener();
+    await tick();
+    await tick();
     expect(document.getElementById('t').hasAttribute('data-fc')).toBe(false);
     history.replaceState({}, '', '/');
   });
