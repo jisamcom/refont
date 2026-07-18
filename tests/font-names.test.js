@@ -13,6 +13,12 @@ describe('labelOf', () => {
   it('handles null/undefined', () => {
     expect(labelOf(null)).toBe('');
   });
+  it('is locale-aware: Korean alias only under ko, family name otherwise', () => {
+    expect(labelOf('Batang', 'ko')).toBe('바탕');
+    expect(labelOf('Batang', 'en')).toBe('Batang');
+    expect(labelOf('Malgun Gothic', 'en')).toBe('Malgun Gothic');
+    expect(labelOf('Pretendard Variable', 'en')).toBe('Pretendard'); // still strips " Variable"
+  });
 });
 
 describe('toOptions', () => {

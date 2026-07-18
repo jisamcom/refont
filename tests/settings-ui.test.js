@@ -94,6 +94,21 @@ describe('mountSettingsUI', () => {
     expect(root.querySelector('#bodyPicker').style.getPropertyValue('--fp-custom')).toContain('Custom');
   });
 
+  it('shows font names in English, not Korean aliases, under an English UI', () => {
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'options', currentHost: null, installedFonts: ['Batang'],
+      settings: { ...DEFAULTS, language: 'en', bodyFont: { source: 'system', name: 'Batang', systemFamily: 'Batang' } } });
+    // top readout summary + picker button
+    expect(root.querySelector('#readout').textContent).toContain('Batang');
+    expect(root.querySelector('#readout').textContent).not.toContain('바탕');
+    expect(root.querySelector('#bodyPicker .fp-name').textContent).toBe('Batang');
+    // the option row itself
+    root.querySelector('#bodyPicker .fp-btn').click();
+    const rowNames = [...root.querySelectorAll('#bodyPicker .fp-opt .o-name')].map((n) => n.textContent);
+    expect(rowNames).toContain('Batang');
+    expect(rowNames).not.toContain('바탕');
+  });
+
   it('syncs document lang and title to the chosen locale', () => {
     const root = document.createElement('div');
     mountSettingsUI(root, { context: 'options', currentHost: null, settings: { ...DEFAULTS, language: 'en' } });

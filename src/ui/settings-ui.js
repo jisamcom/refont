@@ -349,7 +349,7 @@ export function mountSettingsUI(root, ctx) {
     // {b:true} → <b>; plain → text. Built with DOM nodes so a custom font name
     // (user input in state.family) can never inject markup here.
     const parts = [
-      { b: true, t: labelOf(effectiveFamily(state)) },
+      { b: true, t: labelOf(effectiveFamily(state), locale) },
       { b: true, t: state.scale.toFixed(2) + '×' },
       { b: true, t: String(state.weight) },
     ];
@@ -528,7 +528,7 @@ export function mountSettingsUI(root, ctx) {
       value: state.systemFamily || 'Pretendard Variable',
       sample: 'Aa가',
       recent: () => state.recentFonts.body,
-      t,
+      t, locale,
       onChange: (f) => { state.systemFamily = f; pushRecent('body', f); applyPreview(); scheduleLiveApply(); },
     });
     cp = makeFontPicker($('codePicker'), {
@@ -536,7 +536,7 @@ export function mountSettingsUI(root, ctx) {
       value: state.codeFamily || 'Consolas',
       sample: '{ }',
       recent: () => state.recentFonts.code,
-      t,
+      t, locale,
       onChange: (f) => { state.codeFamily = f; pushRecent('code', f); updateCodePrev(f); scheduleLiveApply(); },
     });
   }

@@ -34,10 +34,14 @@ export const FONT_ALIASES = {
   'Apple SD 산돌고딕 Neo': 'Apple SD Gothic Neo',
 };
 
-// Display label: Korean name if known, else family; always strip " Variable".
-export function labelOf(family) {
+// Display label for a family, locale-aware: the Korean alias only under the Korean
+// UI, otherwise the real family name (so an English UI shows "Batang", not "바탕").
+// Always strips " Variable". Defaults to 'ko' so locale-agnostic callers (e.g. the
+// toOptions dedup key) keep their previous behaviour.
+export function labelOf(family, locale = 'ko') {
   const f = String(family || '');
-  return (FONT_KO_NAMES[f] || f).replace(' Variable', '');
+  const base = locale === 'ko' ? (FONT_KO_NAMES[f] || f) : f;
+  return base.replace(' Variable', '');
 }
 
 // Map a family-name array to picker option objects ({f} or {f, ko}), de-duped by

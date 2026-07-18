@@ -36,7 +36,7 @@ const PICKER_FALLBACK = {
 // fonts: [{f, ko?}]; value: css family string; sample: swatch text; onChange(family)
 // recent: optional array of family strings (or a function returning one) shown in a "최근" group.
 // t: optional translator (key, vars) — falls back to Korean when absent.
-export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange, recent, t }) {
+export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange, recent, t, locale = 'ko' }) {
   const uid = `fp${pickerSeq++}`;
   const tr = typeof t === 'function' ? t : (k, v) => {
     let s = PICKER_FALLBACK[k] || k;
@@ -64,13 +64,13 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
   const list = el('div', 'fp-list'); list.setAttribute('role', 'listbox'); list.id = listId;
   panel.append(search, list);
   mount.replaceChildren(btn, panel);
-  const labFor = (fam) => { const o = fonts.find((x) => x.f === fam); return o ? (o.ko || o.f).replace(' Variable', '') : labelOf(fam); };
+  const labFor = (fam) => { const o = fonts.find((x) => x.f === fam); return o ? labOf(o) : labelOf(fam, locale); };
   const paintBtn = () => {
     bSamp.style.fontFamily = famStack(val); bSamp.textContent = sample;
     bName.textContent = labFor(val); bName.classList.toggle('custom', custom);
   };
   const optFor = (fam) => fonts.find((x) => x.f === fam) || { f: fam };
-  const labOf = (o) => (o.ko || o.f).replace(' Variable', '');
+  const labOf = (o) => (locale === 'ko' ? (o.ko || o.f) : o.f).replace(' Variable', '');
   const span = (cls, text) => { const s = document.createElement('span'); s.className = cls; if (text != null) s.textContent = text; return s; };
   // The chosen family is rendered in BOTH the 최근 and 전체 groups, but a
   // single-select listbox may carry only one aria-selected. Mark the first
