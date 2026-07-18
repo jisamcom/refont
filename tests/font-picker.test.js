@@ -43,6 +43,27 @@ describe('makeFontPicker', () => {
     expect(mount.querySelectorAll('.fp-group').length).toBe(0);
   });
 
+  it('wires combobox aria-controls/activedescendant and keeps selection separate from the keyboard highlight', () => {
+    const mount = document.createElement('div');
+    makeFontPicker(mount, { fonts: FONTS, value: 'Batang' }); // Batang is the selected value
+    const search = mount.querySelector('.fp-search');
+    const list = mount.querySelector('.fp-list');
+    expect(list.id).toBeTruthy();
+    expect(search.getAttribute('aria-controls')).toBe(list.id); // combobox points at the listbox
+    mount.querySelector('.fp-btn').click();
+    // The selected row is aria-selected=true and stays so as the highlight moves.
+    const selected = [...mount.querySelectorAll('.fp-opt')].find((r) => r.getAttribute('aria-selected') === 'true');
+    expect(selected.querySelector('.o-name').textContent).toBe('바탕');
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    const active = mount.querySelector('.fp-opt.active');
+    expect(active.id).toBeTruthy();
+    expect(search.getAttribute('aria-activedescendant')).toBe(active.id); // tracks the highlight
+    // Selection is untouched by highlighting: exactly one aria-selected=true, still 바탕.
+    const stillSelected = [...mount.querySelectorAll('.fp-opt')].filter((r) => r.getAttribute('aria-selected') === 'true');
+    expect(stillSelected.length).toBe(1);
+    expect(stillSelected[0].querySelector('.o-name').textContent).toBe('바탕');
+  });
+
   it('does not inject markup from a malicious family name (imported/custom)', () => {
     const evil = 'x"><img src=q onerror="window.__pwned=1">';
     const mount = document.createElement('div');

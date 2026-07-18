@@ -18,9 +18,14 @@ export function filterFonts(fonts, q) {
   return fonts.filter((o) => o.f.toLowerCase().includes(ql) || (o.ko && o.ko.toLowerCase().includes(ql)));
 }
 
+// Distinct id prefix per picker instance so aria-controls / aria-activedescendant
+// (and the option ids they point at) are unique when several pickers coexist.
+let pickerSeq = 0;
+
 // fonts: [{f, ko?}]; value: css family string; sample: swatch text; onChange(family)
 // recent: optional array of family strings (or a function returning one) shown in a "최근" group.
 export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange, recent }) {
+  const uid = `fp${pickerSeq++}`;
   let val = value;
   let custom = !fonts.some((o) => o.f === value);
   // Build via DOM APIs (no innerHTML) — keeps AMO's static-analysis happy and is
@@ -32,9 +37,11 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
   const cv = el('span', 'fp-cv'); cv.textContent = '⌄';
   btn.append(bSamp, bName, cv);
   const panel = el('div', 'fp-panel'); panel.hidden = true;
+  const listId = `${uid}-list`;
   const search = el('input', 'fp-search'); search.placeholder = '검색 또는 직접 입력…';
   search.setAttribute('role', 'combobox'); search.setAttribute('aria-autocomplete', 'list'); search.setAttribute('aria-expanded', 'false');
-  const list = el('div', 'fp-list'); list.setAttribute('role', 'listbox');
+  search.setAttribute('aria-controls', listId);
+  const list = el('div', 'fp-list'); list.setAttribute('role', 'listbox'); list.id = listId;
   panel.append(search, list);
   mount.replaceChildren(btn, panel);
   const labFor = (fam) => { const o = fonts.find((x) => x.f === fam); return o ? (o.ko || o.f).replace(' Variable', '') : labelOf(fam); };
@@ -80,7 +87,11 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
       row.onclick = () => pick(typed, true); list.appendChild(row);
     }
     if (!list.children.length) { list.textContent = ''; list.append(span('fp-empty', '결과 없음 — 입력해서 직접 지정하세요')); }
-    active = -1; // reset keyboard highlight whenever the list is rebuilt
+    // Give each option a stable id so aria-activedescendant can reference it, and
+    // reset the keyboard highlight whenever the list is rebuilt.
+    rows().forEach((r, i) => { r.id = `${uid}-opt-${i}`; });
+    active = -1;
+    search.removeAttribute('aria-activedescendant');
   }
   // Keyboard combobox: Arrow keys move a highlight over the option rows, Enter
   // picks it (or the first row), Escape closes. Options are click-only <div>s, so
@@ -89,17 +100,20 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
   const rows = () => [...list.querySelectorAll('.fp-opt')];
   function highlight(i) {
     const rs = rows();
-    if (!rs.length) { active = -1; return; }
+    if (!rs.length) { active = -1; search.removeAttribute('aria-activedescendant'); return; }
     active = (i + rs.length) % rs.length;
+    // `active` is the keyboard highlight, tracked via .active + aria-activedescendant.
+    // aria-selected stays reserved for the CHOSEN value (set in addRow), so moving
+    // the highlight never mislabels the current selection as unselected.
     rs.forEach((r, idx) => {
       const on = idx === active;
       r.classList.toggle('active', on);
-      r.setAttribute('aria-selected', String(on));
       if (on) { try { r.scrollIntoView && r.scrollIntoView({ block: 'nearest' }); } catch {} }
     });
+    search.setAttribute('aria-activedescendant', rs[active].id);
   }
   const open = () => { mount.classList.add('open'); panel.hidden = false; search.setAttribute('aria-expanded', 'true'); search.value = ''; render(''); search.focus(); };
-  const close = () => { mount.classList.remove('open'); panel.hidden = true; search.setAttribute('aria-expanded', 'false'); };
+  const close = () => { mount.classList.remove('open'); panel.hidden = true; search.setAttribute('aria-expanded', 'false'); search.removeAttribute('aria-activedescendant'); };
   function pick(f, isCustom) { val = f; custom = isCustom; paintBtn(); close(); onChange && onChange(f); }
   btn.onclick = () => (mount.classList.contains('open') ? close() : open());
   search.oninput = () => render(search.value);
