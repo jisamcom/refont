@@ -113,6 +113,65 @@ export function fetchFontCached(url, fetchFn = fetch) {
   return p;
 }
 
+// Extract only the @font-face rules from a stylesheet, dropping arbitrary
+// selectors, nested @import, @media, and any background-image/beacon requests. A
+// @font-face body holds only descriptors (family, src, weight, unicode-range…),
+// so passing the block through can't restyle the page — the sole external request
+// it can trigger is the font file itself. The scan is brace-matched and quote-
+// aware so a `}` inside a quoted url() can't truncate a block.
+export function extractFontFaces(cssText) {
+  const src = String(cssText || '');
+  const re = /@font-face\s*\{/gi;
+  const out = [];
+  let m;
+  while ((m = re.exec(src))) {
+    let i = re.lastIndex; // just past the opening brace
+    let depth = 1;
+    let quote = '';
+    for (; i < src.length; i += 1) {
+      const c = src[i];
+      if (quote) { if (c === quote && src[i - 1] !== '\\') quote = ''; continue; }
+      if (c === '"' || c === "'") { quote = c; continue; }
+      if (c === '{') depth += 1;
+      else if (c === '}') { depth -= 1; if (depth === 0) { i += 1; break; } }
+    }
+    out.push(src.slice(m.index, i));
+    re.lastIndex = i;
+  }
+  return out.join('\n');
+}
+
+// Cap on a fetched webfont stylesheet (text). Google Fonts CSS is a few KB; this
+// bounds a hostile URL that streams megabytes of CSS.
+export const MAX_FONT_CSS_BYTES = 512 * 1024;
+
+// Fetch a webfont "CSS link" in the background (extension origin — no page
+// cookies) and return ONLY its @font-face rules. This replaces a page-side
+// @import, which would pull the whole remote author stylesheet into the page.
+export async function fetchFontCss(url, fetchFn = fetch) {
+  const res = await fetchFn(url);
+  if (!res.ok) throw new Error(`css fetch failed: ${res.status}`);
+  const declared = Number(header(res, 'content-length'));
+  if (declared > MAX_FONT_CSS_BYTES) throw new Error(`css too large: ${declared} bytes`);
+  const text = await res.text();
+  if (text.length > MAX_FONT_CSS_BYTES) throw new Error(`css too large: ${text.length} bytes`);
+  return extractFontFaces(text);
+}
+
+// One fetch per stylesheet URL per worker lifetime (all_frames amplification), an
+// in-flight promise is shared, and a failure is evicted so a retry can succeed.
+const fontCssCache = new Map();
+export function fetchFontCssCached(url, fetchFn = fetch) {
+  if (fontCssCache.has(url)) return fontCssCache.get(url);
+  const p = fetchFontCss(url, fetchFn).catch((e) => {
+    if (fontCssCache.get(url) === p) fontCssCache.delete(url);
+    throw e;
+  });
+  fontCssCache.set(url, p);
+  while (fontCssCache.size > MAX_FONT_CACHE_ENTRIES) fontCssCache.delete(fontCssCache.keys().next().value);
+  return p;
+}
+
 // Build the insertCSS/removeCSS target. Targeting the *sender's* frame is what
 // makes the font reach content rendered inside iframes (e.g. Naver Cafe renders
 // its article in a same-origin <iframe id="cafe_main">). Omitting frameIds makes
@@ -288,6 +347,8 @@ if (browser && browser.runtime && browser.runtime.onMessage) {
         return saveSettings(msg.payload).then(async (s) => { await broadcastReapply(); return s; });
       case MSG.FETCH_FONT:
         return fetchFontCached(msg.url);
+      case MSG.FETCH_FONT_CSS:
+        return fetchFontCssCached(msg.url);
       case MSG.CSS_REGISTER:
         registerCssOwner(tabId, frameId, msg.docId || (sender && sender.documentId));
         return undefined;

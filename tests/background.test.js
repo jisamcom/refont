@@ -10,7 +10,63 @@ import {
   guessFontMime, arrayBufferToBase64, fetchFontAsDataUrl, cssTarget,
   replaceCssSerialized, registerCssOwner, purgeTabCss, __cssStateSize,
   classifyFontResponse, fetchFontCached, MAX_FONT_BYTES, MAX_FONT_CACHE_ENTRIES,
+  extractFontFaces, fetchFontCss, MAX_FONT_CSS_BYTES,
 } from '../src/background.js';
+
+describe('extractFontFaces', () => {
+  it('keeps only @font-face rules and drops everything else', () => {
+    const css = `
+      @import url("https://evil.test/track.css");
+      body { background: url("https://evil.test/beacon.gif"); color: red; }
+      @font-face { font-family: 'Roboto'; src: url(https://fonts.gstatic.com/r.woff2) format('woff2'); font-display: swap; }
+      .ad { display: none !important; }
+      @font-face{font-family:"Lora";src:url(https://fonts.gstatic.com/l.woff2)}
+    `;
+    const out = extractFontFaces(css);
+    expect(out).toContain("font-family: 'Roboto'");
+    expect(out).toContain('font-family:"Lora"');
+    expect(out).not.toMatch(/@import/i);
+    expect(out).not.toMatch(/beacon\.gif/);
+    expect(out).not.toMatch(/\.ad/);
+    expect(out).not.toMatch(/background/);
+  });
+  it('handles a closing brace inside a quoted url without truncating the block', () => {
+    const css = `@font-face { font-family: 'X'; src: url("https://x.test/a}b.woff2"); } .after{color:red}`;
+    const out = extractFontFaces(css);
+    expect(out).toContain('a}b.woff2');
+    expect(out).not.toMatch(/\.after/);
+  });
+  it('returns empty string when there are no font-face rules', () => {
+    expect(extractFontFaces('body{color:red} @media print{a{x:y}}')).toBe('');
+    expect(extractFontFaces('')).toBe('');
+  });
+});
+
+describe('fetchFontCss', () => {
+  const res = (text, { contentLength } = {}) => ({
+    ok: true, status: 200,
+    headers: new Map(contentLength != null ? [['content-length', String(contentLength)]] : []),
+    text: async () => text,
+  });
+  it('fetches a stylesheet and returns only its @font-face rules', async () => {
+    const css = `a{color:red} @font-face{font-family:"R";src:url(x.woff2)}`;
+    const out = await fetchFontCss('https://fonts.googleapis.com/css2?family=R', async () => res(css));
+    expect(out).toBe('@font-face{font-family:"R";src:url(x.woff2)}');
+  });
+  it('rejects an oversized stylesheet by declared length before reading', async () => {
+    let read = false;
+    const fakeFetch = async () => ({
+      ok: true, status: 200,
+      headers: new Map([['content-length', String(MAX_FONT_CSS_BYTES + 1)]]),
+      text: async () => { read = true; return ''; },
+    });
+    await expect(fetchFontCss('https://x/css', fakeFetch)).rejects.toThrow(/large/);
+    expect(read).toBe(false);
+  });
+  it('throws on an http error', async () => {
+    await expect(fetchFontCss('https://x/css', async () => ({ ok: false, status: 404 }))).rejects.toThrow(/404/);
+  });
+});
 
 function fontRes(bytes, { contentType, contentLength } = {}) {
   const headers = new Map();

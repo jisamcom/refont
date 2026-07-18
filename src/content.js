@@ -344,9 +344,15 @@ async function injectWebFont(nextSettings, generation) {
   const style = document.createElement('style');
   style.id = styleId;
   if (bf.urlType === 'css') {
-    // Use the normalized href (percent-encodes quotes/braces) so a crafted URL
-    // can't break out of url("…") and inject arbitrary CSS.
-    style.textContent = `@import url("${parsed.href}");`;
+    // Fetch the stylesheet in the background and inject ONLY its @font-face rules
+    // — never an @import of the whole remote sheet (which would run arbitrary
+    // selectors, nested @imports, and background-image beacons in the page).
+    try {
+      const faces = await browser.runtime.sendMessage({ type: MSG.FETCH_FONT_CSS, url: bf.url });
+      if (generation !== applyGeneration) return;
+      if (!faces) return;
+      style.textContent = faces;
+    } catch { return; }
   } else {
     try {
       const dataUrl = await browser.runtime.sendMessage({ type: MSG.FETCH_FONT, url: bf.url });
