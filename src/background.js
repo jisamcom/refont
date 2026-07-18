@@ -144,12 +144,20 @@ export function extractFontFaces(cssText) {
       continue;
     }
     if (src[i] === '"' || src[i] === "'") { i = skipCssString(src, i); continue; }
-    // A real @font-face rule: the token, then optional whitespace, then `{`.
-    if (src[i] === '@' && /^@font-face\s*\{/i.test(src.slice(i, i + 40))) {
+    // A real @font-face rule: the token, then whitespace/comments, then `{`. Scan
+    // for the brace (skipping `/* comments */` and any amount of whitespace) rather
+    // than matching a fixed-length slice, so `@font-face /* x */ {` or a long gap
+    // before `{` still counts.
+    if (src[i] === '@' && /^@font-face/i.test(src.slice(i, i + 10)) && !/[\w-]/.test(src[i + 10] || '')) {
+      let k = i + 10;
+      while (k < n) {
+        if (src[k] === '/' && src[k + 1] === '*') { const e = src.indexOf('*/', k + 2); k = e === -1 ? n : e + 2; continue; }
+        if (/\s/.test(src[k])) { k += 1; continue; }
+        break;
+      }
+      if (src[k] !== '{') { i += 10; continue; } // @font-face not opening a block
       const start = i;
-      let j = i;
-      while (src[j] !== '{') j += 1;
-      j += 1; // past the opening brace
+      let j = k + 1; // past the opening brace
       let depth = 1;
       while (j < n && depth > 0) {
         const c = src[j];

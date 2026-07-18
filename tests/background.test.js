@@ -51,6 +51,16 @@ describe('extractFontFaces', () => {
     const css = `/* @font-face { font-family: Ghost; src: url(ghost.woff2) } */ .x{color:red}`;
     expect(extractFontFaces(css)).toBe('');
   });
+  it('matches an @font-face with a comment or long whitespace before the brace', () => {
+    const withComment = `@font-face /* the icon face */ { font-family:X; src:url(x.woff2) } .a{}`;
+    expect(extractFontFaces(withComment)).toContain('src:url(x.woff2)');
+    const withGap = `@font-face\n\n\n            \t{ font-family:Y; src:url(y.woff2) }`;
+    expect(extractFontFaces(withGap)).toContain('src:url(y.woff2)');
+  });
+  it('does not match @font-face-like idents that do not open a block', () => {
+    expect(extractFontFaces('@font-faces { a:b }')).toBe('');
+    expect(extractFontFaces('@font-face-x { a:b }')).toBe('');
+  });
 });
 
 describe('absolutizeFontUrls', () => {
