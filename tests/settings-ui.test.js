@@ -223,6 +223,29 @@ describe('scope + protection', () => {
     rows[0].querySelector('.plus').click();
     expect(root.querySelector('#protect').value).toContain('Font Awesome 6 Free');
   });
+  it('popup toggle sends the desired enable state and mirrors an allow-exception for a parent-blocked site', () => {
+    const root = document.createElement('div');
+    const sent = [];
+    mountSettingsUI(root, {
+      context: 'popup', currentHost: 'sub.example.com', currentUrl: 'https://sub.example.com/', tabId: 1,
+      blocked: true, settings: { ...DEFAULTS, blocklist: ['example.com'] },
+      send: (m) => { sent.push(m); return Promise.resolve({}); },
+    });
+    root.querySelector('#toggle').click(); // currently blocked by the parent rule → turn ON
+    expect(sent).toContainEqual({ type: MSG.TOGGLE_SITE, url: 'https://sub.example.com/', enable: true });
+    expect(root.querySelector('#allowlist').value).toBe('sub.example.com'); // exception added...
+    expect(root.querySelector('#blocklist').value).toBe('example.com');     // ...parent rule untouched
+  });
+  it('round-trips the allowlist through the options editor', () => {
+    const root = document.createElement('div');
+    const api = mountSettingsUI(root, { context: 'options', currentHost: null,
+      settings: { ...DEFAULTS, allowlist: ['keep.example.com'] } });
+    const alEl = root.querySelector('#allowlist');
+    expect(alEl.value).toBe('keep.example.com');
+    alEl.value = 'keep.example.com\nalso.example.com';
+    alEl.dispatchEvent(new Event('input'));
+    expect(api.state.allowlist).toEqual(['keep.example.com', 'also.example.com']);
+  });
 });
 
 describe('reset to defaults', () => {

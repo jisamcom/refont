@@ -120,6 +120,15 @@ describe('settings validation', () => {
   });
 });
 
+describe('allowlist', () => {
+  it('defaults to empty and normalizes to a bounded string list', () => {
+    expect(DEFAULTS.allowlist).toEqual([]);
+    expect(normalizeSettings({}).allowlist).toEqual([]);
+    expect(normalizeSettings({ allowlist: ['sub.example.com', '  ', 5] }).allowlist).toEqual(['sub.example.com']);
+    expect(normalizeSettings({ allowlist: 'nope' }).allowlist).toEqual([]);
+  });
+});
+
 describe('language setting', () => {
   it('defaults to auto', () => {
     expect(DEFAULTS.language).toBe('auto');

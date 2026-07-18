@@ -1,5 +1,50 @@
 import { describe, it, expect } from 'vitest';
-import { effectivePageUrl, isBlocked } from '../src/lib/url-match.js';
+import { effectivePageUrl, isBlocked, matchesList, computeSiteToggle } from '../src/lib/url-match.js';
+
+describe('computeSiteToggle', () => {
+  it('blocks an unblocked site by adding an exact-host entry', () => {
+    expect(computeSiteToggle('https://a.com/x', false, [], [])).toEqual({ blocklist: ['a.com'], allowlist: [] });
+  });
+  it('unblocks an exact-host block by removing it', () => {
+    expect(computeSiteToggle('https://a.com/x', true, ['a.com'], [])).toEqual({ blocklist: [], allowlist: [] });
+  });
+  it('re-enables a site blocked by a PARENT rule via an allow exception, not by widening the block', () => {
+    expect(computeSiteToggle('https://sub.example.com/', true, ['example.com'], []))
+      .toEqual({ blocklist: ['example.com'], allowlist: ['sub.example.com'] });
+  });
+  it('re-blocking a parent-covered site removes its allow exception without duplicating the block', () => {
+    expect(computeSiteToggle('https://sub.example.com/', false, ['example.com'], ['sub.example.com']))
+      .toEqual({ blocklist: ['example.com'], allowlist: [] });
+  });
+  it('does not add a redundant block when a parent rule already covers the site', () => {
+    expect(computeSiteToggle('https://sub.example.com/', false, ['example.com'], []))
+      .toEqual({ blocklist: ['example.com'], allowlist: [] });
+  });
+  it('is a no-op for an unparseable URL', () => {
+    expect(computeSiteToggle('not a url', true, ['x.com'], [])).toEqual({ blocklist: ['x.com'], allowlist: [] });
+  });
+});
+
+describe('isBlocked with allowlist override', () => {
+  it('re-enables a site blocked by a parent-domain rule', () => {
+    expect(isBlocked('https://sub.example.com/', ['example.com'])).toBe(true);
+    expect(isBlocked('https://sub.example.com/', ['example.com'], ['sub.example.com'])).toBe(false);
+  });
+  it('exempts only matching hosts, not siblings', () => {
+    expect(isBlocked('https://other.example.com/', ['example.com'], ['sub.example.com'])).toBe(true);
+  });
+  it('supports path scope in the allowlist like the blocklist', () => {
+    expect(isBlocked('https://example.com/admin/x', ['example.com'], ['example.com/admin'])).toBe(false);
+    expect(isBlocked('https://example.com/other', ['example.com'], ['example.com/admin'])).toBe(true);
+  });
+  it('is backward compatible with a 2-arg call (no allowlist)', () => {
+    expect(isBlocked('https://example.com/', ['example.com'])).toBe(true);
+  });
+  it('exposes matchesList (raw block match, no allowlist)', () => {
+    expect(matchesList('https://sub.example.com/', ['example.com'])).toBe(true);
+    expect(matchesList('https://example.com/', [])).toBe(false);
+  });
+});
 
 describe('isBlocked', () => {
   it('returns false for empty blocklist', () => {

@@ -487,7 +487,7 @@ function teardown() {
 // alter *which* elements get tagged (see needsFullRescan).
 function applyFull(next, generation) {
   settings = next;
-  const active = settings.enabled && !isBlocked(pageUrl, settings.blocklist);
+  const active = settings.enabled && !isBlocked(pageUrl, settings.blocklist, settings.allowlist);
   const prevCss = appliedCss; // capture before teardown clears it
   teardown();
   if (!active) { replaceCss('', prevCss); return; }
@@ -556,7 +556,7 @@ async function apply(override, { full = false } = {}) {
 
 // True when Refont should be applied to the current URL. `observer` is live iff
 // we are currently applied, so it doubles as "was active".
-function isActiveFor(s) { return !!s && s.enabled && !isBlocked(pageUrl, s.blocklist); }
+function isActiveFor(s) { return !!s && s.enabled && !isBlocked(pageUrl, s.blocklist, s.allowlist); }
 
 // A same-document SPA navigation (pushState/replaceState/back-forward) changes
 // the URL without re-running the content script, so a path-scoped blocklist entry
@@ -632,7 +632,7 @@ if (typeof window !== 'undefined' && window.addEventListener) {
 // of the document before the observer was live, re-tag once the DOM is complete.
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', function scanLate() {
-    if (settings && settings.enabled && !isBlocked(pageUrl, settings.blocklist)) {
+    if (settings && settings.enabled && !isBlocked(pageUrl, settings.blocklist, settings.allowlist)) {
       scan(document.documentElement);
     }
   }, { once: true });

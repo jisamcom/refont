@@ -4,6 +4,7 @@ import { MSG } from '../lib/messaging.js';
 import { DEFAULTS } from '../lib/storage.js';
 import { serializeSettings, parseSettings } from '../lib/settings-io.js';
 import { parseAxes, splitTextAxes } from '../lib/engine.js';
+import { computeSiteToggle } from '../lib/url-match.js';
 import { localFontsSupported, queryInstalledFamilies } from '../lib/local-fonts.js';
 import { labelOf, toOptions } from './font-names.js';
 import { makeFontPicker } from './font-picker.js';
@@ -28,6 +29,7 @@ export function settingsToState(s) {
     codeEnabled: !!(s.codeFont && s.codeFont.name),
     codeFamily: (s.codeFont && s.codeFont.name) || '',
     blocklist: (s.blocklist || []).slice(),
+    allowlist: (s.allowlist || []).slice(),
     protectExtra: (s.protectionDenylistExtra || []).slice(),
     manualExclusions: { ...(s.manualExclusions || {}) },
     recentFonts: {
@@ -47,7 +49,7 @@ export function stateToSettings(st) {
     width: st.width, opticalSizing: st.opticalSizing,
     preserveBold: st.preserveBold, lineHeight: st.lineHeight, letterSpacing: st.letterSpacing,
     wordSpacing: st.wordSpacing, axes: st.axes,
-    blocklist: st.blocklist, protectionDenylistExtra: st.protectExtra,
+    blocklist: st.blocklist, allowlist: st.allowlist, protectionDenylistExtra: st.protectExtra,
     manualExclusions: st.manualExclusions, recentFonts: st.recentFonts,
   };
 }
@@ -183,6 +185,10 @@ const MARKUP = `<div class="popup" id="popup">
         </div>
         <label class="field" data-i18n="scope.blocklistLabel">블록리스트 (한 줄에 하나)</label>
         <textarea id="blocklist">docs.google.com/spreadsheets</textarea>
+        <details class="adv">
+          <summary data-i18n="scope.allowlistSummary">항상 켤 사이트 (차단 규칙 예외)</summary>
+          <textarea id="allowlist" placeholder="한 줄에 하나 — 상위/경로 규칙으로 차단돼도 이 호스트는 켜짐" style="margin-top:6px" data-i18n-placeholder="scope.allowlistPlaceholder"></textarea>
+        </details>
         <details class="adv">
           <summary data-i18n="scope.advSummary">고급: 이 사이트의 특정 요소 제외 (CSS 선택자)</summary>
           <span class="hint" id="selNote" style="display:none;font-size:11px;color:var(--ink-dim)"></span>
@@ -576,6 +582,12 @@ export function mountSettingsUI(root, ctx) {
     state.blocklist = blocklistEl.value.split('\n').map((s) => s.trim()).filter(Boolean);
     scheduleLiveApply();
   });
+  const allowlistEl = $('allowlist');
+  allowlistEl.value = state.allowlist.join('\n');
+  allowlistEl.addEventListener('input', () => {
+    state.allowlist = allowlistEl.value.split('\n').map((s) => s.trim()).filter(Boolean);
+    scheduleLiveApply();
+  });
   const protectEl = $('protect');
   protectEl.value = state.protectExtra.join('\n');
   protectEl.addEventListener('input', () => {
@@ -758,12 +770,16 @@ export function mountSettingsUI(root, ctx) {
       on = !on;
       setToggle(on);
       toggleLbl.textContent = on ? t('toggle.on') : t('toggle.off');
-      // keep state.blocklist in sync (off => host present)
-      const set = new Set(state.blocklist);
-      if (on) set.delete(host); else if (host) set.add(host);
-      state.blocklist = [...set];
+      // Mirror the background's authoritative list math locally (so a later Save
+      // stays consistent): this may add an allow-exception rather than an exact
+      // block when a broader rule covers the site.
+      const url = ctx.currentUrl || host;
+      const next = computeSiteToggle(url, on, state.blocklist, state.allowlist);
+      state.blocklist = next.blocklist;
+      state.allowlist = next.allowlist;
       const blEl = $('blocklist'); if (blEl) blEl.value = state.blocklist.join('\n');
-      send({ type: MSG.TOGGLE_SITE, url: ctx.currentUrl || host });
+      const alEl = $('allowlist'); if (alEl) alEl.value = state.allowlist.join('\n');
+      send({ type: MSG.TOGGLE_SITE, url, enable: on });
     });
   } else {
     let on = state.enabled !== false;

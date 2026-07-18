@@ -26,6 +26,7 @@ export const DEFAULTS = {
   axes: '',          // raw variable-axis string, e.g. "opsz 14, wdth 80"
   weightFine: false, // weight slider continuous (variable) vs 100-step
   blocklist: [],
+  allowlist: [], // per-site overrides that re-enable a host/path a broader block rule caught
   manualExclusions: {},
   protectionDenylistExtra: [],
   recentFonts: { body: [], code: [] }, // recently picked fonts, per picker kind
@@ -105,6 +106,7 @@ export function normalizeSettings(input) {
     axes: boundedString(s.axes, DEFAULTS.axes, 500),
     weightFine: typeof s.weightFine === 'boolean' ? s.weightFine : DEFAULTS.weightFine,
     blocklist: stringList(s.blocklist, 500, 500),
+    allowlist: stringList(s.allowlist, 500, 500),
     manualExclusions,
     protectionDenylistExtra: stringList(s.protectionDenylistExtra, 200, 200),
     recentFonts: {

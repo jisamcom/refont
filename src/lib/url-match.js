@@ -67,15 +67,17 @@ export function effectivePageUrl(loc = globalThis.location, doc = globalThis.doc
   return href;
 }
 
-export function isBlocked(url, blocklist) {
-  if (!Array.isArray(blocklist) || blocklist.length === 0) return false;
+// Does `url` match any bare-domain / domain+path entry in `list`? Shared by both
+// the blocklist and the allowlist (same host/path semantics).
+export function matchesList(url, list) {
+  if (!Array.isArray(list) || list.length === 0) return false;
   let target;
   try { target = new URL(url); } catch { return false; }
   if (!/^https?:$/.test(target.protocol)) return false;
 
   const hostname = target.hostname.toLowerCase();
   const pathname = target.pathname.toLowerCase();
-  return blocklist.some((raw) => {
+  return list.some((raw) => {
     const entry = parseEntry(raw);
     if (!entry || !entry.hostname) return false;
     const hostMatches = hostname === entry.hostname || hostname.endsWith(`.${entry.hostname}`);
@@ -83,4 +85,39 @@ export function isBlocked(url, blocklist) {
     if (entry.port && entry.port !== target.port) return false;
     return !entry.path || pathname === entry.path || pathname.startsWith(`${entry.path}/`);
   });
+}
+
+// A site is blocked when the blocklist matches AND the allowlist does not. The
+// allowlist re-enables a specific host/path that a broader block rule (a parent
+// domain, or a path prefix) would otherwise catch — without narrowing the block
+// for siblings. `allowlist` is optional so existing 2-arg callers are unchanged.
+export function isBlocked(url, blocklist, allowlist = []) {
+  return matchesList(url, blocklist) && !matchesList(url, allowlist);
+}
+
+// Pure list math for the site on/off toggle. `enable` is the DESIRED state, so a
+// site blocked by a broader rule can be undone instead of gaining a redundant
+// exact-host block:
+//   enable=true  → drop an exact-host block; if a parent/path rule still catches
+//                  the URL, add a host allow-exception (which overrides the block).
+//   enable=false → drop any allow-exception; if nothing blocks the URL yet, add
+//                  an exact-host block.
+// Only OUR exact-host entries are ever added/removed — a user's parent/path rules
+// are never widened or deleted. Returns the next {blocklist, allowlist}; an
+// unparseable URL is a no-op.
+export function computeSiteToggle(url, enable, blocklist = [], allowlist = []) {
+  const bl = Array.isArray(blocklist) ? blocklist.slice() : [];
+  const al = Array.isArray(allowlist) ? allowlist.slice() : [];
+  let host = '';
+  try { host = new URL(url).host.toLowerCase(); } catch { return { blocklist: bl, allowlist: al }; }
+  const want = typeof enable === 'boolean' ? enable : isBlocked(url, bl, al);
+  const dropExact = (list) => { const i = list.indexOf(host); if (i >= 0) list.splice(i, 1); };
+  if (want) {
+    dropExact(bl);
+    if (matchesList(url, bl)) { if (!al.includes(host)) al.push(host); } else dropExact(al);
+  } else {
+    dropExact(al);
+    if (!matchesList(url, bl)) bl.push(host);
+  }
+  return { blocklist: bl, allowlist: al };
 }

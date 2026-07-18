@@ -16,7 +16,7 @@ async function init() {
   try { pageFonts = await browser.tabs.sendMessage(tab.id, { type: MSG.GET_PAGE_FONTS }); } catch {}
   mountSettingsUI(document.getElementById('root'), {
     context: 'popup', currentHost: host, currentUrl: url, tabId: tab && tab.id,
-    blocked: isBlocked(url, settings.blocklist),
+    blocked: isBlocked(url, settings.blocklist, settings.allowlist),
     settings, installedFonts, monoFonts, pageFonts: pageFonts || [],
   });
 }

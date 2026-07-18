@@ -2,7 +2,7 @@
 import browser from 'webextension-polyfill';
 import { MSG } from './lib/messaging.js';
 import { getSettings, saveSettings } from './lib/storage.js';
-import { isBlocked } from './lib/url-match.js';
+import { isBlocked, computeSiteToggle } from './lib/url-match.js';
 
 export function guessFontMime(url) {
   let u = String(url).toLowerCase();
@@ -255,14 +255,19 @@ async function setBadge(tabId, enabled) {
   } catch {}
 }
 
-async function toggleSite(url) {
+// Turn Refont on/off for a site. `enable` is the DESIRED state (the popup knows
+// the current one and flips it) so a site blocked by a broader rule can actually
+// be undone instead of gaining a redundant exact-host block:
+//   enable=true  → drop an exact-host block; if a parent/path rule still catches
+//                  the URL, add a host allow-exception (which overrides the block).
+//   enable=false → drop any allow-exception; if nothing blocks the URL yet, add
+//                  an exact-host block.
+// We only ever add/remove OUR exact-host entries — a user's parent/path rules are
+// never widened or deleted (that's what the allowlist exists to override).
+async function toggleSite(url, enable) {
   const settings = await getSettings();
-  let host = '';
-  try { host = new URL(url).host; } catch { return settings; }
-  const list = settings.blocklist.slice();
-  const idx = list.findIndex((e) => e === host);
-  if (idx >= 0) list.splice(idx, 1); else list.push(host);
-  return saveSettings({ blocklist: list });
+  const next = computeSiteToggle(url, enable, settings.blocklist, settings.allowlist || []);
+  return saveSettings(next);
 }
 
 async function broadcastReapply() {
@@ -289,7 +294,7 @@ if (browser && browser.runtime && browser.runtime.onMessage) {
       case MSG.REPLACE_CSS:
         return replaceCssSerialized(tabId, frameId, msg.css || '', msg.docId || (sender && sender.documentId), undefined, msg.prev || '');
       case MSG.TOGGLE_SITE:
-        return toggleSite(msg.url || (sender.tab && sender.tab.url)).then(async (s) => { await broadcastReapply(); return s; });
+        return toggleSite(msg.url || (sender.tab && sender.tab.url), msg.enable).then(async (s) => { await broadcastReapply(); return s; });
       default:
         return undefined;
     }
@@ -307,7 +312,7 @@ if (browser && browser.runtime && browser.runtime.onMessage) {
     browser.tabs.onUpdated.addListener(async (tabId, info, tab) => {
       if (info.status !== 'complete' || !tab.url) return;
       const s = await getSettings();
-      setBadge(tabId, s.enabled && !isBlocked(tab.url, s.blocklist));
+      setBadge(tabId, s.enabled && !isBlocked(tab.url, s.blocklist, s.allowlist));
     });
   }
 
