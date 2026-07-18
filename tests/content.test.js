@@ -194,6 +194,17 @@ describe('content var-engine', () => {
     expect(d.hasAttribute('data-fc')).toBe(true);
   });
 
+  it('untags an element when its only text node is removed (removedNodes-only mutation)', async () => {
+    document.body.innerHTML = '<p id="t">hello</p>';
+    await freshApply(makeSettings({ scale: 2 }));
+    const p = document.getElementById('t');
+    expect(p.hasAttribute('data-fc')).toBe(true);
+    p.firstChild.remove(); // removes the text node → only a removedNodes childList record fires
+    await tick();
+    expect(p.hasAttribute('data-fc')).toBe(false);
+    expect(p.hasAttribute('data-fc-size')).toBe(false);
+  });
+
   it('leaves a protected (icon-font) element untouched', async () => {
     document.body.innerHTML = '<span id="ic" style="font-family:FontAwesome;font-size:12px">icon</span>';
     await freshApply(makeSettings({ scale: 2 }));

@@ -310,6 +310,13 @@ function startObserver() {
         // just that element now that it holds direct text.
         else if (n.nodeType === 3 && m.target && m.target.nodeType === 1) pendingReclassify.add(m.target);
       }
+      // A *text node removed* (e.g. textNode.remove()) fires only a removedNodes
+      // record — no characterData — so a now-empty element would otherwise keep
+      // its stale data-fc/size/weight. Re-evaluate the target: reclassify untags
+      // it when no direct text remains.
+      for (const n of m.removedNodes) {
+        if (n.nodeType === 3 && m.target && m.target.nodeType === 1) pendingReclassify.add(m.target);
+      }
       // A text change affects only the target element's own classification.
       if (m.type === 'characterData' && m.target.parentElement) pendingReclassify.add(m.target.parentElement);
       // A class/style change can also restyle descendants (descendant selectors,
