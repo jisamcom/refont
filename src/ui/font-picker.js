@@ -22,10 +22,27 @@ export function filterFonts(fonts, q) {
 // (and the option ids they point at) are unique when several pickers coexist.
 let pickerSeq = 0;
 
+// Korean fallback strings so a caller (or test) that passes no `t` still renders.
+const PICKER_FALLBACK = {
+  'picker.search': '검색 또는 직접 입력…',
+  'picker.recent': '최근',
+  'picker.all': '전체',
+  'picker.custom': '직접',
+  'picker.customBadge': '커스텀',
+  'picker.useCustom': '직접 사용: "{name}"',
+  'picker.empty': '결과 없음 — 입력해서 직접 지정하세요',
+};
+
 // fonts: [{f, ko?}]; value: css family string; sample: swatch text; onChange(family)
 // recent: optional array of family strings (or a function returning one) shown in a "최근" group.
-export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange, recent }) {
+// t: optional translator (key, vars) — falls back to Korean when absent.
+export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange, recent, t }) {
   const uid = `fp${pickerSeq++}`;
+  const tr = typeof t === 'function' ? t : (k, v) => {
+    let s = PICKER_FALLBACK[k] || k;
+    if (v) for (const n in v) s = s.split('{' + n + '}').join(String(v[n]));
+    return s;
+  };
   let val = value;
   let custom = !fonts.some((o) => o.f === value);
   // Build via DOM APIs (no innerHTML) — keeps AMO's static-analysis happy and is
@@ -37,8 +54,11 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
   const cv = el('span', 'fp-cv'); cv.textContent = '⌄';
   btn.append(bSamp, bName, cv);
   const panel = el('div', 'fp-panel'); panel.hidden = true;
+  // The custom-selection badge (`.fp-name.custom::after`) is CSS content; feed its
+  // text in as a custom property so it localises too.
+  mount.style.setProperty('--fp-custom', JSON.stringify(tr('picker.custom')));
   const listId = `${uid}-list`;
-  const search = el('input', 'fp-search'); search.placeholder = '검색 또는 직접 입력…';
+  const search = el('input', 'fp-search'); search.placeholder = tr('picker.search');
   search.setAttribute('role', 'combobox'); search.setAttribute('aria-autocomplete', 'list'); search.setAttribute('aria-expanded', 'false');
   search.setAttribute('aria-controls', listId);
   const list = el('div', 'fp-list'); list.setAttribute('role', 'listbox'); list.id = listId;
@@ -80,9 +100,9 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
     if (!typed) {
       const rec = (typeof recent === 'function' ? recent() : recent) || [];
       if (rec.length) {
-        group('최근');
+        group(tr('picker.recent'));
         for (const fam of rec) addRow(optFor(fam));
-        group('전체');
+        group(tr('picker.all'));
       }
     }
     for (const o of filterFonts(fonts, q)) addRow(o);
@@ -90,10 +110,10 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
       const row = document.createElement('div');
       row.className = 'fp-opt mk';
       row.setAttribute('role', 'option'); row.setAttribute('aria-selected', 'false');
-      row.append(span('o-check', '✓'), span('o-name', `직접 사용: "${typed}"`), span('badge', 'custom'));
+      row.append(span('o-check', '✓'), span('o-name', tr('picker.useCustom', { name: typed })), span('badge', tr('picker.customBadge')));
       row.onclick = () => pick(typed, true); list.appendChild(row);
     }
-    if (!list.children.length) { list.textContent = ''; list.append(span('fp-empty', '결과 없음 — 입력해서 직접 지정하세요')); }
+    if (!list.children.length) { list.textContent = ''; list.append(span('fp-empty', tr('picker.empty'))); }
     // Give each option a stable id so aria-activedescendant can reference it, and
     // reset the keyboard highlight whenever the list is rebuilt.
     rows().forEach((r, i) => { r.id = `${uid}-opt-${i}`; });

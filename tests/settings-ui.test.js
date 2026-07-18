@@ -75,6 +75,35 @@ describe('mountSettingsUI', () => {
     expect(root.querySelector('#vWidth').textContent).toBe('Original');
   });
 
+  it('preserves the chosen language through the export round-trip', () => {
+    // Export serializes { ...DEFAULTS, ...stateToSettings(state) }, so the mappers
+    // must carry `language` or it silently reverts to DEFAULTS ('auto').
+    expect(settingsToState({ ...DEFAULTS, language: 'en' }).language).toBe('en');
+    expect(stateToSettings(settingsToState({ ...DEFAULTS, language: 'en' })).language).toBe('en');
+    expect(stateToSettings(settingsToState({ ...DEFAULTS, language: 'ko' })).language).toBe('ko');
+  });
+
+  it('renders the font picker in English when language is en', () => {
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'options', currentHost: null, settings: { ...DEFAULTS, language: 'en' } });
+    root.querySelector('#bodyPicker .fp-btn').click(); // open the picker
+    expect(root.querySelector('#bodyPicker .fp-search').placeholder).toBe('Search or type…');
+    const search = root.querySelector('#bodyPicker .fp-search');
+    search.value = 'MyFont'; search.dispatchEvent(new Event('input'));
+    expect(root.querySelector('#bodyPicker .fp-opt.mk .o-name').textContent).toBe('Use custom: "MyFont"');
+    expect(root.querySelector('#bodyPicker').style.getPropertyValue('--fp-custom')).toContain('Custom');
+  });
+
+  it('syncs document lang and title to the chosen locale', () => {
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'options', currentHost: null, settings: { ...DEFAULTS, language: 'en' } });
+    expect(document.documentElement.lang).toBe('en');
+    expect(document.title).toBe('Refont Settings');
+    mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1, settings: { ...DEFAULTS, language: 'ko' } });
+    expect(document.documentElement.lang).toBe('ko');
+    expect(document.title).toBe('Refont');
+  });
+
   it('persists the language and reloads when the selector changes (options only)', async () => {
     const root = document.createElement('div');
     const sent = [];

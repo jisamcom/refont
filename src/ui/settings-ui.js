@@ -49,6 +49,7 @@ export function settingsToState(s) {
   const source = bf.source || 'system';
   return {
     enabled: s.enabled,
+    language: s.language || DEFAULTS.language,
     source,
     // system and web families are tracked separately so switching source (or
     // hiding the web family field in CSS-link mode) can't apply one where the
@@ -79,6 +80,7 @@ export function settingsToState(s) {
 export function stateToSettings(st) {
   return {
     enabled: st.enabled,
+    language: st.language,
     // name is the active family; systemFamily/webFamily persist BOTH picks so the
     // inactive source survives a save/reopen (see storage DEFAULTS.bodyFont).
     bodyFont: { source: st.source, name: effectiveFamily(st), url: st.source === 'weburl' ? st.url : null, urlType: st.urlType, systemFamily: st.systemFamily, webFamily: st.webFamily },
@@ -295,6 +297,13 @@ export function mountSettingsUI(root, ctx) {
   const locale = resolveLocale(settings.language);
   const t = createT(locale);
   applyI18n(root, t);
+  // Keep the document's language + title in sync with the chosen locale so screen
+  // readers announce the right language and the tab/title matches (the static HTML
+  // ships lang="ko"/a Korean title; this corrects it for an English selection).
+  try {
+    document.documentElement.lang = locale;
+    document.title = t(ctx.context === 'options' ? 'app.optionsTitle' : 'app.popupTitle');
+  } catch {}
 
   // ---- live specimen preview + sliders + weight + axes (scoped to root) ----
   const $ = (id) => root.querySelector('#' + id);
@@ -519,6 +528,7 @@ export function mountSettingsUI(root, ctx) {
       value: state.systemFamily || 'Pretendard Variable',
       sample: 'Aa가',
       recent: () => state.recentFonts.body,
+      t,
       onChange: (f) => { state.systemFamily = f; pushRecent('body', f); applyPreview(); scheduleLiveApply(); },
     });
     cp = makeFontPicker($('codePicker'), {
@@ -526,6 +536,7 @@ export function mountSettingsUI(root, ctx) {
       value: state.codeFamily || 'Consolas',
       sample: '{ }',
       recent: () => state.recentFonts.code,
+      t,
       onChange: (f) => { state.codeFamily = f; pushRecent('code', f); updateCodePrev(f); scheduleLiveApply(); },
     });
   }
