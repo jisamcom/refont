@@ -127,37 +127,54 @@ export function isBlocked(url, blocklist, allowlist = []) {
 // the host first, escalating to host+path only when a more specific rule needs to
 // be beaten. A user's broader parent/prefix rules are never widened or deleted.
 // An unparseable URL is a no-op.
+// Canonical form of a rule string (hostname[:port][/path]), matching how
+// matchesList compares — lowercased, trailing slashes stripped. Two differently
+// spelled rules for the same target (uppercase path, a pasted full URL, a trailing
+// slash, an explicit :443) canonicalize equal. null if unparseable.
+function canonOf(raw) {
+  const e = parseEntry(raw);
+  if (!e || !e.hostname) return null;
+  return e.hostname + (e.port ? `:${e.port}` : '') + (e.path || '');
+}
+
 export function computeSiteToggle(url, enable, blocklist = [], allowlist = []) {
   const bl = Array.isArray(blocklist) ? blocklist.slice() : [];
   const al = Array.isArray(allowlist) ? allowlist.slice() : [];
   let u;
   try { u = new URL(url); } catch { return { blocklist: bl, allowlist: al }; }
-  const host = u.host.toLowerCase();
-  const path = u.pathname.replace(/\/+$/, '');
-  const hostPath = path ? `${host}${path}` : host;
-  // The entries we own for this page (exact host, and exact host+path). Ordered
-  // least → most specific so we add the smallest exception that does the job.
-  const keys = hostPath === host ? [host] : [host, hostPath];
-  const without = (list) => list.filter((e) => !keys.includes(String(e).trim().toLowerCase()));
+  const hostPart = u.hostname.toLowerCase() + (u.port ? `:${u.port}` : '');
+  const pathLower = u.pathname.toLowerCase().replace(/\/+$/, '');
+  const hostKey = hostPart;
+  const pathKey = pathLower ? `${hostPart}${pathLower}` : hostPart;
+  // The entries we own for this page, canonical, least → most specific.
+  const keys = pathKey === hostKey ? [hostKey] : [hostKey, pathKey];
+  // Remove ONLY the entries that canonicalize to one of our page keys (compared
+  // canonically, so casing/format differences still match). A user's broader
+  // parent/prefix rules are left intact so sibling paths keep their state.
+  const without = (list, drop) => list.filter((e) => !drop.includes(canonOf(e)));
+  // Add a canonical key unless an equivalent entry is already present.
+  const addKey = (list, key) => (list.some((e) => canonOf(e) === key) ? list : list.concat(key));
   const want = typeof enable === 'boolean' ? enable : isBlocked(url, bl, al);
   if (want) {
     // Want ON (not blocked): drop our exact blocks; if a broader rule still blocks,
-    // add the least-specific allow exception that wins.
-    const nbl = without(bl);
-    if (!isBlocked(url, nbl, al)) return { blocklist: nbl, allowlist: without(al) };
+    // add the least-specific allow exception that wins — WITHOUT dropping existing
+    // allows (an exact-host allow may still be re-enabling sibling paths).
+    const nbl = without(bl, keys);
+    if (!isBlocked(url, nbl, al)) return { blocklist: nbl, allowlist: al };
     for (const key of keys) {
-      const nal = without(al).concat(key);
+      const nal = addKey(al, key);
       if (!isBlocked(url, nbl, nal)) return { blocklist: nbl, allowlist: nal };
     }
-    return { blocklist: nbl, allowlist: without(al).concat(hostPath) };
+    return { blocklist: nbl, allowlist: addKey(al, pathKey) };
   }
   // Want OFF (blocked): drop our exact allows (incl. one that exactly re-enabled
-  // this page); if nothing blocks yet, add the least-specific block that wins.
-  const nal = without(al);
+  // this page); if nothing blocks yet, add the least-specific block that wins,
+  // preserving existing blocks.
+  const nal = without(al, keys);
   if (isBlocked(url, bl, nal)) return { blocklist: bl, allowlist: nal };
   for (const key of keys) {
-    const nbl = without(bl).concat(key);
+    const nbl = addKey(bl, key);
     if (isBlocked(url, nbl, nal)) return { blocklist: nbl, allowlist: nal };
   }
-  return { blocklist: without(bl).concat(hostPath), allowlist: nal };
+  return { blocklist: addKey(bl, pathKey), allowlist: nal };
 }

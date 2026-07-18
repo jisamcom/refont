@@ -38,6 +38,20 @@ describe('computeSiteToggle', () => {
     flips('http://example.com:3000/', true, ['example.com:3000'], []);      // ON despite :3000 block
     flips('http://example.com:3000/', false, [], ['example.com:3000', 'example.com']); // OFF despite :3000 allow
   });
+  it('flips regardless of how the existing rule is spelled (case/full-URL/trailing slash)', () => {
+    flips('https://example.com/Admin', false, [], ['example.com/admin']);        // uppercase path
+    flips('https://example.com/admin', false, [], ['https://example.com/admin']); // pasted full URL
+    flips('https://example.com/admin', false, [], ['example.com/admin/']);        // trailing slash
+    flips('https://example.com/admin', true, ['EXAMPLE.COM/admin'], []);          // uppercase host rule
+  });
+  it('does not remove an existing exact-host allow when escalating to a path exception (siblings kept)', () => {
+    const next = computeSiteToggle('https://sub.example.com/admin/x', true,
+      ['example.com', 'sub.example.com/admin'], ['sub.example.com']);
+    expect(isBlocked('https://sub.example.com/admin/x', next.blocklist, next.allowlist)).toBe(false); // target ON
+    // A sibling path under the same host stays enabled (its host allow survived).
+    expect(next.allowlist).toContain('sub.example.com');
+    expect(isBlocked('https://sub.example.com/other', next.blocklist, next.allowlist)).toBe(false);
+  });
   it('turns OFF a sub-host under an allowed parent by adding a more-specific block', () => {
     // block+allow both on example.com → whole domain currently re-enabled.
     const next = computeSiteToggle('https://sub.example.com/', false, ['example.com'], ['example.com']);
