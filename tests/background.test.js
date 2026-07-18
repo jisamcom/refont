@@ -101,6 +101,18 @@ describe('absolutizeFontUrls', () => {
     expect(absolutizeFontUrls('/* url(../x.woff2) */ a', base)).toBe('/* url(../x.woff2) */ a');
     expect(absolutizeFontUrls('myurl(../x.woff2)', base)).toBe('myurl(../x.woff2)');
   });
+  it('consumes CR / CRLF / form-feed after a hex escape', () => {
+    expect(absolutizeFontUrls('url("../font/A\\41\\x0cB.woff2")'.replace('\\x0c', '\f'), base))
+      .toContain('url("https://cdn.test/font/AAB.woff2")'); // \f consumed, not left as %0C
+    expect(absolutizeFontUrls('url("../font/A\\41\\x0d\\x0aB.woff2")'.replace('\\x0d', '\r').replace('\\x0a', '\n'), base))
+      .toContain('url("https://cdn.test/font/AAB.woff2")'); // CRLF consumed as one unit
+  });
+  it('absolutizes a url() with CSS comments around its argument', () => {
+    expect(absolutizeFontUrls('src:url("../font/a.woff2"/* c */)', base))
+      .toContain('url("https://cdn.test/font/a.woff2")');
+    expect(absolutizeFontUrls('src:url(/* c */"../font/a.woff2")', base))
+      .toContain('url("https://cdn.test/font/a.woff2")');
+  });
 });
 
 describe('fetchFontCss', () => {

@@ -186,7 +186,7 @@ export function extractFontFaces(cssText) {
 // `\` + any other char is that char literally. Without this, a backslash reaches
 // new URL() and is treated as a path separator, corrupting the address.
 function decodeCssEscapes(s) {
-  return String(s).replace(/\\(?:([0-9a-fA-F]{1,6})[ \t\n]?|(\r\n|[\n\r\f])|([\s\S]))/g,
+  return String(s).replace(/\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|(\r\n|[\n\r\f])|([\s\S]))/g,
     (m, hex, nl, ch) => {
       if (hex) { const cp = parseInt(hex, 16); try { return cp ? String.fromCodePoint(cp) : '�'; } catch { return '�'; } }
       if (nl != null) return ''; // escaped newline = line continuation
@@ -224,6 +224,16 @@ export function absolutizeFontUrls(cssText, baseUrl) {
   let out = '';
   let i = 0;
   const n = src.length;
+  // Skip whitespace AND CSS comments (both are stripped before tokenization, so
+  // either may sit between `url(`, the argument, and `)`).
+  const skipWsc = (k) => {
+    while (k < n) {
+      if (/\s/.test(src[k])) { k += 1; continue; }
+      if (src[k] === '/' && src[k + 1] === '*') { const e = src.indexOf('*/', k + 2); k = e === -1 ? n : e + 2; continue; }
+      break;
+    }
+    return k;
+  };
   while (i < n) {
     const c = src[i];
     if (c === '/' && src[i + 1] === '*') {
@@ -235,8 +245,7 @@ export function absolutizeFontUrls(cssText, baseUrl) {
     // A url( function token — not the tail of a longer ident like `myurl(`.
     if ((c === 'u' || c === 'U') && /^url\(/i.test(src.slice(i, i + 4)) && !(i > 0 && /[\w-]/.test(src[i - 1]))) {
       const tokenStart = i;
-      let j = i + 4;
-      while (j < n && /\s/.test(src[j])) j += 1;
+      let j = skipWsc(i + 4);
       let ref = '';
       let quote = '';
       if (src[j] === '"' || src[j] === "'") {
@@ -254,7 +263,7 @@ export function absolutizeFontUrls(cssText, baseUrl) {
         }
         ref = decodeCssEscapes(raw.trim());
       }
-      while (j < n && /\s/.test(src[j])) j += 1;
+      j = skipWsc(j);
       if (src[j] === ')') {
         const raw = src.slice(tokenStart, j + 1);
         if (!ref || /^(?:data|blob):/i.test(ref)) { out += raw; i = j + 1; continue; }
