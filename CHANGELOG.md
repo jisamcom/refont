@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.1 — 2026-07-18
+
+### 🐛 Fixes
+- **firefox:** raise strict_min_version to 142 for data_collection_permissions
+- **i18n:** show family names (not Korean aliases) under an English UI
+- **i18n:** close three localization gaps in settings UI
+
 ## v0.3.0 — 2026-07-18
 
 ### ✨ Features
