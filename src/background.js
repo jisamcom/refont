@@ -172,20 +172,78 @@ export function extractFontFaces(cssText) {
   return out.join('\n');
 }
 
+// Emit a url() token for an already-resolved absolute address, preserving the
+// input quote style. An unquoted input is re-quoted only if the address contains a
+// char that can't sit bare in url() (whitespace, parens, quotes, backslash).
+function buildUrlToken(abs, quote) {
+  if (quote) {
+    const esc = abs.replace(/\\/g, '\\\\').replace(new RegExp(quote, 'g'), `\\${quote}`);
+    return `url(${quote}${esc}${quote})`;
+  }
+  if (/[\s()"'\\]/.test(abs)) return `url("${abs.replace(/[\\"]/g, (m) => `\\${m}`)}")`;
+  return `url(${abs})`;
+}
+
 // Rewrite relative url(...) references to absolute, resolved against the
 // stylesheet's own (post-redirect) address. The extracted rules are injected into
 // the VISITED page's <style>, where a relative `url(../f.woff2)` would otherwise
 // resolve against the page — not the font host — and 404. Google Fonts ships
 // absolute URLs (unaffected); a generic CDN stylesheet often ships relative ones.
-// data:/blob: refs and anything that fails to resolve are left untouched.
+//
+// A CSS-aware scan (not a regex): strings and comments are stepped over so a url()
+// inside one isn't touched, and the url() argument is read honouring quotes and
+// backslash escapes — so `url("../v(2).woff2")` (a `)` inside quotes) and
+// `url(../v\(2\).woff2)` (an escaped `)`) resolve correctly instead of being
+// missed or corrupted. data:/blob:/empty refs and anything that fails to resolve
+// are left exactly as-is.
 export function absolutizeFontUrls(cssText, baseUrl) {
   const src = String(cssText || '');
   if (!baseUrl) return src;
-  return src.replace(/url\(\s*(['"]?)([^'")]*)\1\s*\)/gi, (whole, q, ref) => {
-    const v = ref.trim();
-    if (!v || /^(?:data|blob):/i.test(v)) return whole;
-    try { return `url(${q}${new URL(v, baseUrl).href}${q})`; } catch { return whole; }
-  });
+  let out = '';
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i];
+    if (c === '/' && src[i + 1] === '*') {
+      const e = src.indexOf('*/', i + 2);
+      const end = e === -1 ? n : e + 2;
+      out += src.slice(i, end); i = end; continue;
+    }
+    if (c === '"' || c === "'") { const j = skipCssString(src, i); out += src.slice(i, j); i = j; continue; }
+    // A url( function token — not the tail of a longer ident like `myurl(`.
+    if ((c === 'u' || c === 'U') && /^url\(/i.test(src.slice(i, i + 4)) && !(i > 0 && /[\w-]/.test(src[i - 1]))) {
+      const tokenStart = i;
+      let j = i + 4;
+      while (j < n && /\s/.test(src[j])) j += 1;
+      let ref = '';
+      let quote = '';
+      if (src[j] === '"' || src[j] === "'") {
+        quote = src[j];
+        const end = skipCssString(src, j);
+        ref = src.slice(j + 1, end - 1);
+        j = end;
+      } else {
+        while (j < n && src[j] !== ')') {
+          if (src[j] === '\\') { ref += src[j + 1] || ''; j += 2; continue; } // unescape
+          ref += src[j]; j += 1;
+        }
+        ref = ref.trim();
+      }
+      while (j < n && /\s/.test(src[j])) j += 1;
+      if (src[j] === ')') {
+        const raw = src.slice(tokenStart, j + 1);
+        if (!ref || /^(?:data|blob):/i.test(ref)) { out += raw; i = j + 1; continue; }
+        let abs;
+        try { abs = new URL(ref, baseUrl).href; } catch { out += raw; i = j + 1; continue; }
+        out += buildUrlToken(abs, quote);
+        i = j + 1; continue;
+      }
+      // Unterminated url( — emit the literal and keep scanning past it.
+      out += src.slice(tokenStart, i + 4); i += 4; continue;
+    }
+    out += c; i += 1;
+  }
+  return out;
 }
 
 // Cap on a fetched webfont stylesheet. Google Fonts CSS is a few KB; this bounds a

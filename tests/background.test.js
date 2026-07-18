@@ -67,6 +67,20 @@ describe('absolutizeFontUrls', () => {
     expect(absolutizeFontUrls('url(https://x.test/a.woff2)', base)).toContain('url(https://x.test/a.woff2)');
     expect(absolutizeFontUrls('url(data:font/woff2;base64,AA)', base)).toContain('url(data:font/woff2;base64,AA)');
   });
+  it('resolves a quoted url whose filename contains a )', () => {
+    const out = absolutizeFontUrls('src:url("../font/v(2).woff2")', base);
+    expect(out).toContain('url("https://cdn.test/font/v(2).woff2")'); // not left relative
+    expect(out).not.toContain('../font'); // fully resolved
+  });
+  it('resolves an unquoted url with an escaped ) without corrupting it', () => {
+    const out = absolutizeFontUrls('src:url(../font/v\\(2\\).woff2)', base);
+    expect(out).toContain('https://cdn.test/font/v(2).woff2'); // correct absolute address
+    expect(out).not.toContain('../font');
+  });
+  it('does not touch a url() inside a comment or a non-url ident', () => {
+    expect(absolutizeFontUrls('/* url(../x.woff2) */ a', base)).toBe('/* url(../x.woff2) */ a');
+    expect(absolutizeFontUrls('myurl(../x.woff2)', base)).toBe('myurl(../x.woff2)');
+  });
 });
 
 describe('fetchFontCss', () => {
