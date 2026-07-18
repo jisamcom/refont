@@ -792,7 +792,7 @@ export function mountSettingsUI(root, ctx) {
     }
     clearTimeout(resetTimer);
     root.replaceChildren();
-    const fresh = mountSettingsUI(root, { ...ctx, settings: DEFAULTS });
+    const fresh = mountSettingsUI(root, { ...ctx, settings: { ...DEFAULTS, language: settings.language } });
     fresh.scheduleLiveApply();
   });
 
