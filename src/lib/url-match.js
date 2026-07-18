@@ -1,23 +1,31 @@
 // URL helpers for site scoping. Blocklist entries support a bare domain or a
 // domain + path prefix, e.g. "google.com" or "docs.google.com/spreadsheets".
 
-function parseEntry(raw) {
-  let value = String(raw || '').trim().toLowerCase();
-  if (!value) return null;
-  try {
-    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
-      const u = new URL(value);
-      return { hostname: u.hostname, port: u.port, path: u.pathname === '/' ? '' : u.pathname.replace(/\/+$/, '') };
-    }
-  } catch { return null; }
+const DEFAULT_PORTS = { 'http:': '80', 'https:': '443' };
+// A URL's effective port: the explicit one, or the protocol default. The URL API
+// normalises a default port (:443 on https, :80 on http) to '', so this is what a
+// port-scoped rule must be compared against.
+function effectivePort(u) { return u.port || DEFAULT_PORTS[u.protocol] || ''; }
 
-  const slash = value.indexOf('/');
-  const hostPart = slash >= 0 ? value.slice(0, slash) : value;
-  const path = slash >= 0 ? value.slice(slash).replace(/\/+$/, '') : '';
-  try {
-    const u = new URL(`http://${hostPart.replace(/^\*\./, '')}`);
-    return { hostname: u.hostname, port: u.port, path };
-  } catch { return null; }
+// Parse a rule string into { hostname, port, path }. The explicit port is read
+// from the raw text (not via URL.port, which drops default ports) so `example.com:443`
+// keeps its :443 constraint and a pasted `https://…:443` doesn't silently become an
+// all-ports rule. An empty port means "any port".
+function parseEntry(raw) {
+  const value = String(raw || '').trim().toLowerCase();
+  if (!value) return null;
+  const scheme = value.match(/^[a-z][a-z0-9+.-]*:\/\//i);
+  const rest = scheme ? value.slice(scheme[0].length) : value;
+  const slash = rest.indexOf('/');
+  const authority = (slash >= 0 ? rest.slice(0, slash) : rest).replace(/^\*\./, '');
+  const path = slash >= 0 ? rest.slice(slash).replace(/\/+$/, '') : '';
+  const portMatch = authority.match(/:(\d{1,5})$/);
+  const port = portMatch ? portMatch[1] : '';
+  const hostRaw = portMatch ? authority.slice(0, authority.length - portMatch[0].length) : authority;
+  let hostname;
+  try { hostname = new URL(`http://${hostRaw}`).hostname; } catch { return null; }
+  if (!hostname) return null;
+  return { hostname, port, path };
 }
 
 // The nearest same-origin ancestor frame's full URL, or '' if none is reachable.
@@ -73,12 +81,12 @@ export function effectivePageUrl(loc = globalThis.location, doc = globalThis.doc
 // hostname length dominates, then the port bonus, so neither the port nor any
 // bounded path can out-rank a more specific host. (Storage caps rules to a few
 // hundred chars, well under the port bonus, so the ordering is total.)
-function entryScore(target, hostname, pathname, raw) {
+function entryScore(tport, hostname, pathname, raw) {
   const entry = parseEntry(raw);
   if (!entry || !entry.hostname) return -1;
   const hostMatches = hostname === entry.hostname || hostname.endsWith(`.${entry.hostname}`);
   if (!hostMatches) return -1;
-  if (entry.port && entry.port !== target.port) return -1;
+  if (entry.port && entry.port !== tport) return -1;
   if (entry.path && !(pathname === entry.path || pathname.startsWith(`${entry.path}/`))) return -1;
   return entry.hostname.length * 1000000 + (entry.port ? 500000 : 0) + (entry.path ? entry.path.length : 0);
 }
@@ -91,9 +99,10 @@ function bestScore(url, list) {
   if (!/^https?:$/.test(target.protocol)) return -1;
   const hostname = target.hostname.toLowerCase();
   const pathname = target.pathname.toLowerCase();
+  const tport = effectivePort(target);
   let best = -1;
   for (const raw of list) {
-    const s = entryScore(target, hostname, pathname, raw);
+    const s = entryScore(tport, hostname, pathname, raw);
     if (s > best) best = s;
   }
   return best;

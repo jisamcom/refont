@@ -75,6 +75,16 @@ describe('isBlocked specificity (longest match wins)', () => {
   it('allow wins on an exact same-target tie', () => {
     expect(isBlocked('https://example.com/', ['example.com'], ['example.com'])).toBe(false);
   });
+  it('matches a default-port rule against the protocol default, not the empty string', () => {
+    // bare :443 must catch the https default port...
+    expect(isBlocked('https://example.com/', ['example.com:443'])).toBe(true);
+    // ...and a :80 rule must NOT catch an https (443) page.
+    expect(isBlocked('https://example.com/', ['http://example.com:80'])).toBe(false);
+    expect(isBlocked('https://example.com/', ['example.com:80'])).toBe(false);
+    // a pasted https://…:443 keeps its port constraint (does not become all-ports).
+    expect(isBlocked('http://example.com/', ['https://example.com:443'])).toBe(false);
+    expect(isBlocked('https://example.com/', ['https://example.com:443'])).toBe(true);
+  });
   it('ranks an explicit port rule above an all-ports rule', () => {
     // :3000 block is more specific than an all-ports allow → blocked.
     expect(isBlocked('http://example.com:3000/', ['example.com:3000'], ['example.com'])).toBe(true);
