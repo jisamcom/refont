@@ -12,6 +12,14 @@ describe('isProtectedFamily', () => {
     expect(isProtectedFamily('Material Icons')).toBe(true);
     expect(isProtectedFamily('codicon')).toBe(true);
   });
+  it('honours the user extra denylist, compiled once per extra array', () => {
+    const extra = ['MyIcons', 'Corp-Symbols'];
+    // Same array reference used repeatedly (the compiled-per-reference cache path).
+    expect(isProtectedFamily('MyIcons Regular', extra)).toBe(true);
+    expect(isProtectedFamily('corp-symbols', extra)).toBe(true); // case-insensitive
+    expect(isProtectedFamily('Helvetica', extra)).toBe(false);
+    expect(isProtectedFamily('Helvetica', [])).toBe(false);      // empty extra → built-in only
+  });
   it('matches math/music/barcode/dingbat/display families', () => {
     expect(isProtectedFamily('KaTeX_Main')).toBe(true);
     expect(isProtectedFamily('MJXTEX-I')).toBe(true);

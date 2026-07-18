@@ -163,14 +163,30 @@ function untagElement(el) {
   el.style.removeProperty('--fc-base-size');
 }
 
-function matchesManualExclusion(el) {
-  const map = settings.manualExclusions || {};
-  const host = pageHost;
-  const list = map[host] || [];
+// The current host's exclusion selectors compiled into one comma-joined selector,
+// cached by (host, list reference). classifyElement runs this per element with a
+// stable settings.manualExclusions, so instead of looping ≤100 selectors each
+// time we validate once and do a single el.matches().
+let mxHost = null;
+let mxList = null;
+let mxSelector = '';
+function manualExclusionSelector() {
+  const list = (settings.manualExclusions || {})[pageHost] || [];
+  if (pageHost === mxHost && list === mxList) return mxSelector;
+  mxHost = pageHost; mxList = list;
+  const valid = [];
   for (const sel of list) {
-    try { if (sel && el.matches(sel)) return true; } catch {}
+    if (!sel) continue;
+    // Validate each selector in isolation so one bad entry can't void the rest.
+    try { document.createDocumentFragment().querySelector(sel); valid.push(sel); } catch {}
   }
-  return false;
+  mxSelector = valid.join(',');
+  return mxSelector;
+}
+function matchesManualExclusion(el) {
+  const sel = manualExclusionSelector();
+  if (!sel) return false;
+  try { return el.matches(sel); } catch { return false; }
 }
 
 function scan(root) {

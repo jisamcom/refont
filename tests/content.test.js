@@ -205,6 +205,14 @@ describe('content var-engine', () => {
     expect(p.hasAttribute('data-fc-size')).toBe(false);
   });
 
+  it('excludes elements via a per-site manual selector and tolerates an invalid entry', async () => {
+    document.body.innerHTML = '<p id="keep">keep</p><p id="drop" class="no-font">drop</p>';
+    // '((bad' is an invalid selector — it must not void the valid '.no-font'.
+    await freshApply(makeSettings({ manualExclusions: { [location.host]: ['((bad', '.no-font'] } }));
+    expect(document.getElementById('keep').hasAttribute('data-fc')).toBe(true);
+    expect(document.getElementById('drop').hasAttribute('data-fc')).toBe(false);
+  });
+
   it('leaves a protected (icon-font) element untouched', async () => {
     document.body.innerHTML = '<span id="ic" style="font-family:FontAwesome;font-size:12px">icon</span>';
     await freshApply(makeSettings({ scale: 2 }));

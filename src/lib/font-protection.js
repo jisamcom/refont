@@ -57,10 +57,25 @@ function splitFamilies(familyStr) {
     .filter(Boolean);
 }
 
+// The combined lowercased denylist (built-in + user extra) is compiled once per
+// `extra` array and cached by its reference. classifyElement calls this for every
+// element with the SAME settings.protectionDenylistExtra array, so this turns a
+// per-element concat+map+lowercase allocation into a single one per apply.
+const denylistCache = new WeakMap();
+function compiledDenylist(extra) {
+  if (!extra || !extra.length) return FONT_FAMILY_DENYLIST;
+  let list = denylistCache.get(extra);
+  if (!list) {
+    list = FONT_FAMILY_DENYLIST.concat(extra.map((s) => String(s).toLowerCase()));
+    denylistCache.set(extra, list);
+  }
+  return list;
+}
+
 export function isProtectedFamily(familyStr, extra = []) {
   if (!familyStr) return false;
   const lower = String(familyStr).toLowerCase();
-  const list = FONT_FAMILY_DENYLIST.concat((extra || []).map((s) => String(s).toLowerCase()));
+  const list = compiledDenylist(extra);
   if (list.some((d) => d && lower.includes(d))) return true;
   const tokens = splitFamilies(familyStr);
   if (tokens.some((t) => FONT_FAMILY_DENYLIST_RISKY.includes(t))) return true;
