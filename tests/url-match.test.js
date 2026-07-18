@@ -23,6 +23,29 @@ describe('computeSiteToggle', () => {
   it('is a no-op for an unparseable URL', () => {
     expect(computeSiteToggle('not a url', true, ['x.com'], [])).toEqual({ blocklist: ['x.com'], allowlist: [] });
   });
+  it('turns OFF a sub-host under an allowed parent by adding a more-specific block', () => {
+    // block+allow both on example.com → whole domain currently re-enabled.
+    const next = computeSiteToggle('https://sub.example.com/', false, ['example.com'], ['example.com']);
+    expect(next.blocklist).toContain('sub.example.com'); // exact block beats the parent allow
+    expect(next.allowlist).toEqual(['example.com']);     // parent re-enable untouched
+    expect(isBlocked('https://sub.example.com/', next.blocklist, next.allowlist)).toBe(true);
+    expect(isBlocked('https://example.com/', next.blocklist, next.allowlist)).toBe(false);
+    expect(isBlocked('https://other.example.com/', next.blocklist, next.allowlist)).toBe(false);
+  });
+});
+
+describe('isBlocked specificity (longest match wins)', () => {
+  it('lets a more-specific block override a parent allow', () => {
+    expect(isBlocked('https://sub.example.com/', ['sub.example.com', 'example.com'], ['example.com'])).toBe(true);
+    expect(isBlocked('https://example.com/', ['sub.example.com', 'example.com'], ['example.com'])).toBe(false);
+  });
+  it('lets a more-specific path block override a broader-path allow', () => {
+    expect(isBlocked('https://example.com/a/b', ['example.com/a'], ['example.com'])).toBe(true);
+    expect(isBlocked('https://example.com/a/b', ['example.com'], ['example.com/a'])).toBe(false);
+  });
+  it('allow wins on an exact same-target tie', () => {
+    expect(isBlocked('https://example.com/', ['example.com'], ['example.com'])).toBe(false);
+  });
 });
 
 describe('isBlocked with allowlist override', () => {

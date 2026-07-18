@@ -67,32 +67,54 @@ export function effectivePageUrl(loc = globalThis.location, doc = globalThis.doc
   return href;
 }
 
+// Specificity score for `raw` matching (hostname, pathname), or -1 if it doesn't
+// match. More specific = a longer entry hostname (an exact host beats a parent
+// domain), then a longer path. hostname length dominates (×1e5) so any path can't
+// out-rank a more specific host.
+function entryScore(target, hostname, pathname, raw) {
+  const entry = parseEntry(raw);
+  if (!entry || !entry.hostname) return -1;
+  const hostMatches = hostname === entry.hostname || hostname.endsWith(`.${entry.hostname}`);
+  if (!hostMatches) return -1;
+  if (entry.port && entry.port !== target.port) return -1;
+  if (entry.path && !(pathname === entry.path || pathname.startsWith(`${entry.path}/`))) return -1;
+  return entry.hostname.length * 100000 + (entry.path ? entry.path.length : 0);
+}
+
+// Best (most specific) matching entry's score for `url` in `list`, or -1 if none.
+function bestScore(url, list) {
+  if (!Array.isArray(list) || list.length === 0) return -1;
+  let target;
+  try { target = new URL(url); } catch { return -1; }
+  if (!/^https?:$/.test(target.protocol)) return -1;
+  const hostname = target.hostname.toLowerCase();
+  const pathname = target.pathname.toLowerCase();
+  let best = -1;
+  for (const raw of list) {
+    const s = entryScore(target, hostname, pathname, raw);
+    if (s > best) best = s;
+  }
+  return best;
+}
+
 // Does `url` match any bare-domain / domain+path entry in `list`? Shared by both
 // the blocklist and the allowlist (same host/path semantics).
 export function matchesList(url, list) {
-  if (!Array.isArray(list) || list.length === 0) return false;
-  let target;
-  try { target = new URL(url); } catch { return false; }
-  if (!/^https?:$/.test(target.protocol)) return false;
-
-  const hostname = target.hostname.toLowerCase();
-  const pathname = target.pathname.toLowerCase();
-  return list.some((raw) => {
-    const entry = parseEntry(raw);
-    if (!entry || !entry.hostname) return false;
-    const hostMatches = hostname === entry.hostname || hostname.endsWith(`.${entry.hostname}`);
-    if (!hostMatches) return false;
-    if (entry.port && entry.port !== target.port) return false;
-    return !entry.path || pathname === entry.path || pathname.startsWith(`${entry.path}/`);
-  });
+  return bestScore(url, list) >= 0;
 }
 
-// A site is blocked when the blocklist matches AND the allowlist does not. The
-// allowlist re-enables a specific host/path that a broader block rule (a parent
-// domain, or a path prefix) would otherwise catch — without narrowing the block
-// for siblings. `allowlist` is optional so existing 2-arg callers are unchanged.
+// A site is blocked when the MOST SPECIFIC matching rule across both lists is a
+// block rule. The allowlist re-enables a host/path that a broader block rule (a
+// parent domain, or a path prefix) would otherwise catch; a still-more-specific
+// block rule (e.g. an exact sub-host under an allowed parent) wins back over it.
+// On an exact tie the allow wins (an explicit same-target re-enable). `allowlist`
+// is optional so existing 2-arg callers are unchanged.
 export function isBlocked(url, blocklist, allowlist = []) {
-  return matchesList(url, blocklist) && !matchesList(url, allowlist);
+  const block = bestScore(url, blocklist);
+  if (block < 0) return false;
+  const allow = bestScore(url, allowlist);
+  if (allow < 0) return true;
+  return block > allow;
 }
 
 // Pure list math for the site on/off toggle. `enable` is the DESIRED state, so a
@@ -113,11 +135,15 @@ export function computeSiteToggle(url, enable, blocklist = [], allowlist = []) {
   const want = typeof enable === 'boolean' ? enable : isBlocked(url, bl, al);
   const dropExact = (list) => { const i = list.indexOf(host); if (i >= 0) list.splice(i, 1); };
   if (want) {
+    // Want ON (not blocked): drop our exact block; if a broader rule still blocks,
+    // add an exact-host allow (more specific → wins). Otherwise clean a stray allow.
     dropExact(bl);
-    if (matchesList(url, bl)) { if (!al.includes(host)) al.push(host); } else dropExact(al);
+    if (isBlocked(url, bl, al)) { if (!al.includes(host)) al.push(host); } else dropExact(al);
   } else {
+    // Want OFF (blocked): drop our exact allow; if nothing blocks yet (incl. a
+    // parent allow winning), add an exact-host block (most specific → wins).
     dropExact(al);
-    if (!matchesList(url, bl)) bl.push(host);
+    if (!isBlocked(url, bl, al)) bl.push(host);
   }
   return { blocklist: bl, allowlist: al };
 }
