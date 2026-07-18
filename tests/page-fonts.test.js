@@ -1,31 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { firstFamilyToken, dedupeClassify, rememberFamily } from '../src/lib/page-fonts.js';
-
-describe('rememberFamily (LRU page-font cache)', () => {
-  it('keeps the most-recently-seen families and evicts the oldest past the cap', () => {
-    const m = new Map();
-    rememberFamily(m, 'a', 'A', 2);
-    rememberFamily(m, 'b', 'B', 2);
-    rememberFamily(m, 'c', 'C', 2); // over cap → evict 'a' (least recent)
-    expect([...m.keys()]).toEqual(['b', 'c']);
-    expect(m.size).toBe(2);
-  });
-  it('does not starve: a new family is always inserted (oldest leaves instead)', () => {
-    const m = new Map();
-    for (const k of ['a', 'b', 'c', 'd']) rememberFamily(m, k, k.toUpperCase(), 2);
-    expect(m.has('d')).toBe(true);      // newest kept
-    expect(m.has('a')).toBe(false);     // oldest evicted, not the newcomer dropped
-  });
-  it('re-seeing a family refreshes its recency so it is not evicted next', () => {
-    const m = new Map();
-    rememberFamily(m, 'a', 'A', 2);
-    rememberFamily(m, 'b', 'B', 2);
-    rememberFamily(m, 'a', 'A2', 2);    // touch 'a' → now most-recent, value updated
-    rememberFamily(m, 'c', 'C', 2);     // evict least-recent, which is now 'b'
-    expect([...m.keys()]).toEqual(['a', 'c']);
-    expect(m.get('a')).toBe('A2');
-  });
-});
+import { firstFamilyToken, dedupeClassify } from '../src/lib/page-fonts.js';
 
 describe('firstFamilyToken', () => {
   it('takes the first family and strips quotes', () => {

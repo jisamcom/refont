@@ -351,6 +351,19 @@ describe('content var-engine', () => {
     ]));
   });
 
+  it('drops a font that is no longer on the page after an SPA swap (lists only current fonts)', async () => {
+    document.body.innerHTML = '<p style="font-family:Georgia">old route</p>';
+    await freshApply(makeSettings());
+    let fonts = await messageListener({ type: MSG.GET_PAGE_FONTS });
+    expect(fonts).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Georgia' })]));
+    // SPA route change: the Georgia content is torn out and Batang content replaces it.
+    document.body.innerHTML = '<p style="font-family:Batang">new route</p>';
+    await tick();
+    fonts = await messageListener({ type: MSG.GET_PAGE_FONTS });
+    expect(fonts).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Batang' })]));
+    expect(fonts.some((f) => f.name === 'Georgia')).toBe(false); // stale font no longer listed
+  });
+
   it('still lists page fonts when Refont is inactive (disabled) via a live DOM fallback', async () => {
     document.body.innerHTML = '<p style="font-family:Georgia">body</p>';
     // Disabled → no classification pass runs, so the cache is empty. The popup

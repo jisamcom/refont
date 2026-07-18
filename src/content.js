@@ -8,7 +8,7 @@ import {
 } from './lib/engine.js';
 import { shouldProtect, hasIconClassHint, isProtectedFamily } from './lib/font-protection.js';
 import { directText, isCodeElement, dedupeRoots } from './lib/dom-utils.js';
-import { dedupeClassify, firstFamilyToken, rememberFamily } from './lib/page-fonts.js';
+import { dedupeClassify, firstFamilyToken } from './lib/page-fonts.js';
 import { getSettings } from './lib/storage.js';
 import { needsFullRescan } from './lib/apply-plan.js';
 
@@ -36,8 +36,15 @@ function registerCssDoc() {
 function forceReplaceCss() {
   browser.runtime.sendMessage({ type: MSG.REPLACE_CSS, css: appliedCss, docId: CSS_DOC_ID }).catch(() => {});
 }
-const pageFontFamilies = new Map();
-const MAX_PAGE_FONT_FAMILIES = 100;
+// Each text-bearing element's ORIGINAL font-family (captured during the read pass,
+// before Refont overrides it). Keyed by the element itself, so a family is only
+// "in use" while its element is still in the DOM — an SPA that swaps A-text for
+// B-text drops A automatically (detached nodes fall out of the live walk and are
+// GC'd), instead of a growing Map that keeps stale families until an LRU cap.
+let elementFamily = new WeakMap();
+// Bound on the popup's live scan so a pathological DOM can't make GET_PAGE_FONTS
+// walk unboundedly.
+const MAX_FONT_SCAN_ELEMENTS = 4000;
 const STATIC_STYLE_ID = '__refont_style';
 const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'HEAD', 'META', 'LINK', 'TITLE']);
 // Recomputed at each apply() (see refreshPageScope) so an SPA that changes the
@@ -119,7 +126,7 @@ function classifyElement(el) {
   const cs = getComputedStyle(el);
   const fontFamily = cs.fontFamily;
   const firstFamily = firstFamilyToken(fontFamily);
-  if (firstFamily) rememberFamily(pageFontFamilies, firstFamily.toLowerCase(), fontFamily, MAX_PAGE_FONT_FAMILIES);
+  if (firstFamily) elementFamily.set(el, fontFamily);
   const className = el.getAttribute('class') || '';
   const pseudoFontFamily = hasIconClassHint(className)
     ? `${pseudoFamily(el, '::before')} ${pseudoFamily(el, '::after')}`
@@ -204,34 +211,34 @@ function scan(root) {
   for (const plan of plans) tagElement(plan);
 }
 
+// The popup's "fonts in use" list. A bounded live walk over currently-present
+// text elements — so a font only appears while something on the page still uses
+// it (fixing an SPA that swapped fonts leaving stale entries). For each element we
+// prefer its recorded ORIGINAL family (captured pre-override); an element Refont
+// never touched (data-fc absent — inactive page, protected, or not-yet-classified)
+// is read live, which is still its original since nothing was applied to it. A
+// tagged element with no record is skipped so Refont's applied font can't leak in.
 function collectPageFonts() {
   const extra = (settings && settings.protectionDenylistExtra) || [];
-  // Families are remembered during the normal read/classification pass, before
-  // Refont writes its own font-family. Opening the popup is therefore O(unique
-  // families), not another synchronous full-DOM getComputedStyle sweep.
-  //
-  // When Refont is inactive on the page (disabled or blocklisted) that pass
-  // never ran, so the cache is empty. Fall back to a one-shot live DOM walk so
-  // the popup can still list the page's fonts — and since nothing was applied,
-  // no Refont font can pollute the reading.
-  const families = pageFontFamilies.size ? [...pageFontFamilies.values()] : livePageFamilies();
-  return dedupeClassify(families, (name) => isProtectedFamily(name, extra), 40);
-}
-
-function livePageFamilies() {
   const raw = [];
+  let visited = 0;
   try {
     const walker = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_ELEMENT);
     let node = walker.currentNode.nodeType === 1 ? walker.currentNode : walker.nextNode();
-    while (node) {
+    while (node && visited < MAX_FONT_SCAN_ELEMENTS) {
       if (!SKIP_TAGS.has(node.tagName)) {
         const t = directText(node);
-        if (t && t.trim()) { try { raw.push(getComputedStyle(node).fontFamily); } catch {} }
+        if (t && t.trim()) {
+          visited += 1;
+          const remembered = elementFamily.get(node);
+          if (remembered) raw.push(remembered);
+          else if (!node.hasAttribute('data-fc')) { try { raw.push(getComputedStyle(node).fontFamily); } catch {} }
+        }
       }
       node = walker.nextNode();
     }
   } catch {}
-  return raw;
+  return dedupeClassify(raw, (name) => isProtectedFamily(name, extra), 40);
 }
 
 // ---- batched mutation handling ----
@@ -497,7 +504,7 @@ function buildSheet(s) {
 function teardown() {
   if (observer) { observer.disconnect(); observer = null; }
   clearPending();
-  pageFontFamilies.clear();
+  elementFamily = new WeakMap(); // drop all captured original families
   flushScheduled = false;
   clearMarks();
   clearVars();
