@@ -98,6 +98,16 @@ describe('isBlocked specificity (longest match wins)', () => {
     expect(isBlocked('https://example.com:8443/', ['https://example.com:8443#section'])).toBe(true);
     expect(isBlocked('https://example.com/', ['https://example.com:8443#section'])).toBe(false);
   });
+  it('normalizes leading-zero ports and rejects out-of-range ones', () => {
+    // Leading zeros canonicalize to the same port.
+    expect(isBlocked('https://example.com/', ['example.com:0443'])).toBe(true);
+    expect(isBlocked('http://example.com/', ['example.com:00080'])).toBe(true);
+    expect(isBlocked('https://example.com/', ['example.com:000443'])).toBe(true); // 6 digits, still 443
+    expect(isBlocked('https://example.com/', ['example.com:00080'])).toBe(false); // 80 ≠ https 443
+    // An out-of-range explicit port rejects the whole entry (not degraded to host-only).
+    expect(matchesList('https://example.com/', ['example.com:99999'])).toBe(false);
+    expect(isBlocked('https://example.com/', ['example.com:99999'])).toBe(false);
+  });
   it('ranks an explicit port rule above an all-ports rule', () => {
     // :3000 block is more specific than an all-ports allow → blocked.
     expect(isBlocked('http://example.com:3000/', ['example.com:3000'], ['example.com'])).toBe(true);

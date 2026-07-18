@@ -27,9 +27,19 @@ function parseEntry(raw) {
     const qh = pathPart.search(/[?#]/);
     path = (qh >= 0 ? pathPart.slice(0, qh) : pathPart).replace(/\/+$/, '');
   }
-  const portMatch = authority.match(/:(\d{1,5})$/);
-  const port = portMatch ? portMatch[1] : '';
-  const hostRaw = portMatch ? authority.slice(0, authority.length - portMatch[0].length) : authority;
+  // Split off ALL trailing digits as the port, normalise to canonical decimal
+  // (so :0443 and :000443 both mean 443), and validate the range. An explicit but
+  // out-of-range port rejects the whole entry rather than silently degrading to a
+  // hostname-only (all-ports) rule.
+  const portMatch = authority.match(/:(\d+)$/);
+  let port = '';
+  let hostRaw = authority;
+  if (portMatch) {
+    const num = Number(portMatch[1]);
+    if (num < 0 || num > 65535) return null;
+    port = String(num);
+    hostRaw = authority.slice(0, authority.length - portMatch[0].length);
+  }
   let hostname;
   try { hostname = new URL(`http://${hostRaw}`).hostname; } catch { return null; }
   if (!hostname) return null;
