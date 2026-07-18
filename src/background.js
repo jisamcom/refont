@@ -330,9 +330,14 @@ async function toggleSite(url, enable) {
 }
 
 async function broadcastReapply() {
+  const settings = await getSettings();
   const tabs = await browser.tabs.query({});
   for (const t of tabs) {
-    if (t.id != null) browser.tabs.sendMessage(t.id, { type: MSG.REAPPLY }).catch(() => {});
+    if (t.id == null) continue;
+    browser.tabs.sendMessage(t.id, { type: MSG.REAPPLY }).catch(() => {});
+    // Keep the toolbar badge current after a save / site toggle / global switch,
+    // instead of only on the next full tab load (tabs.onUpdated).
+    if (t.url) setBadge(t.id, settings.enabled && !isBlocked(t.url, settings.blocklist, settings.allowlist));
   }
 }
 
