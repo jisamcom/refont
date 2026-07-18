@@ -1,3 +1,5 @@
+**한국어** · [English](PRIVACY.en.md)
+
 # Refont 개인정보처리방침
 
 **시행일: 2026년 6월 5일**

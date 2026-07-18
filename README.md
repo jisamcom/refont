@@ -1,3 +1,5 @@
+<p align="right"><b>한국어</b> · <a href="README.en.md">English</a></p>
+
 <div align="center">
   <img src="public/icons/icon-128.png" width="76" alt="Refont">
   <h1>Refont</h1>
