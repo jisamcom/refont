@@ -113,6 +113,14 @@ describe('absolutizeFontUrls', () => {
     expect(absolutizeFontUrls('src:url(/* c */"../font/a.woff2")', base))
       .toContain('url("https://cdn.test/font/a.woff2")');
   });
+  it('strips CSS comments from an UNQUOTED url() instead of encoding them', () => {
+    const trailing = absolutizeFontUrls('src:url(../font/a.woff2/* c */)', base);
+    expect(trailing).toContain('url(https://cdn.test/font/a.woff2)'); // clean, comment gone
+    expect(trailing).not.toMatch(/%2|\/\*/); // no encoded comment chars
+    // A comment mid-token is removed too (its characters never reach the address).
+    const mid = absolutizeFontUrls('src:url(../font/b.woff2/* c */)', base);
+    expect(mid).not.toMatch(/%2|\/\*|\*\//);
+  });
 });
 
 describe('fetchFontCss', () => {

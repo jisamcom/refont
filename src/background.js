@@ -255,9 +255,11 @@ export function absolutizeFontUrls(cssText, baseUrl) {
         j = end;
       } else {
         // Collect the raw argument (keeping backslash pairs so an escaped `)` does
-        // not terminate it), then decode CSS escapes the same way as the quoted arm.
+        // not terminate it, and skipping CSS comments so their characters don't get
+        // encoded into the address), then decode CSS escapes like the quoted arm.
         let raw = '';
         while (j < n && src[j] !== ')') {
+          if (src[j] === '/' && src[j + 1] === '*') { const e = src.indexOf('*/', j + 2); j = e === -1 ? n : e + 2; continue; }
           if (src[j] === '\\') { raw += src[j] + (src[j + 1] || ''); j += 2; continue; }
           raw += src[j]; j += 1;
         }
