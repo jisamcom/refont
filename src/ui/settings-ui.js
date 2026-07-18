@@ -54,8 +54,8 @@ export function settingsToState(s) {
     // hiding the web family field in CSS-link mode) can't apply one where the
     // other is meant. The system family never goes empty (the picker only shows a
     // default, which would otherwise be saved as generic sans-serif).
-    systemFamily: (source === 'system' ? bf.name : '') || DEFAULTS.bodyFont.name,
-    webFamily: source === 'weburl' ? (bf.name || '') : '',
+    systemFamily: bf.systemFamily || (source === 'system' ? bf.name : '') || DEFAULTS.bodyFont.name,
+    webFamily: bf.webFamily != null ? bf.webFamily : (source === 'weburl' ? (bf.name || '') : ''),
     url: bf.url || '',
     urlType: bf.urlType || 'css',
     webfontDisplay: s.webfontDisplay || 'swap',
@@ -79,7 +79,9 @@ export function settingsToState(s) {
 export function stateToSettings(st) {
   return {
     enabled: st.enabled,
-    bodyFont: { source: st.source, name: effectiveFamily(st), url: st.source === 'weburl' ? st.url : null, urlType: st.urlType },
+    // name is the active family; systemFamily/webFamily persist BOTH picks so the
+    // inactive source survives a save/reopen (see storage DEFAULTS.bodyFont).
+    bodyFont: { source: st.source, name: effectiveFamily(st), url: st.source === 'weburl' ? st.url : null, urlType: st.urlType, systemFamily: st.systemFamily, webFamily: st.webFamily },
     webfontDisplay: st.webfontDisplay,
     codeFont: st.codeEnabled && st.codeFamily ? { source: 'system', name: st.codeFamily, url: null, urlType: 'css' } : null,
     scale: st.scale, minSize: st.minSize, weight: st.weight, weightFine: st.weightFine,

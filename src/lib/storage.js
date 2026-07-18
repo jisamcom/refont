@@ -11,7 +11,10 @@ const PX_TO_EM_BASE = 16;
 export const DEFAULTS = {
   schemaVersion: SCHEMA_VERSION,
   enabled: true,
-  bodyFont: { source: 'system', name: 'Pretendard Variable', url: null, urlType: 'css' },
+  // `name` is the ACTIVE family (whichever source is selected). systemFamily and
+  // webFamily persist BOTH sources' picks so switching source — or reopening after
+  // saving one — restores the other instead of resetting it to the default.
+  bodyFont: { source: 'system', name: 'Pretendard Variable', url: null, urlType: 'css', systemFamily: 'Pretendard Variable', webFamily: '' },
   webfontDisplay: 'swap', // @font-face font-display for a fetched file URL: 'swap' | 'optional'
   codeFont: null, // null = leave code/monospace untouched
   scale: 1,
@@ -55,16 +58,23 @@ const stringList = (v, maxItems, maxLength) => {
     .slice(0, maxItems);
 };
 
-function normalizeFont(v, fallback, { nullable = false } = {}) {
+function normalizeFont(v, fallback, { nullable = false, withSources = false } = {}) {
   if (nullable && v == null) return null;
   if (!isRecord(v)) return nullable ? null : { ...fallback };
   const source = FONT_SOURCES.has(v.source) ? v.source : fallback.source;
-  return {
+  const out = {
     source,
     name: boundedString(v.name, fallback.name, 200).trim(),
     url: source === 'weburl' ? boundedString(v.url, '', 4096).trim() || null : null,
     urlType: FONT_URL_TYPES.has(v.urlType) ? v.urlType : fallback.urlType,
   };
+  if (withSources) {
+    // Persist each source's family. Older stored settings lack these keys; fall
+    // back to the active name for whichever source it belonged to.
+    out.systemFamily = boundedString(v.systemFamily, source === 'system' ? out.name : (fallback.systemFamily || ''), 200).trim();
+    out.webFamily = boundedString(v.webFamily, source === 'weburl' ? out.name : (fallback.webFamily || ''), 200).trim();
+  }
+  return out;
 }
 
 // Treat imported JSON, storage contents, and runtime save payloads as untrusted.
@@ -72,8 +82,9 @@ function normalizeFont(v, fallback, { nullable = false } = {}) {
 // settings file from bricking the popup on its next load.
 export function normalizeSettings(input) {
   const s = isRecord(input) ? input : {};
-  const bodyFont = normalizeFont(s.bodyFont, DEFAULTS.bodyFont);
+  const bodyFont = normalizeFont(s.bodyFont, DEFAULTS.bodyFont, { withSources: true });
   if (bodyFont.source !== 'weburl' && !bodyFont.name) bodyFont.name = DEFAULTS.bodyFont.name;
+  if (!bodyFont.systemFamily) bodyFont.systemFamily = DEFAULTS.bodyFont.systemFamily;
 
   const manualExclusions = {};
   if (isRecord(s.manualExclusions)) {

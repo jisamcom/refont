@@ -210,6 +210,20 @@ describe('web font family (system vs web split)', () => {
     st.systemFamily = 'Pretendard Variable';
     expect(stateToSettings(st).bodyFont.name).toBe('Roboto');
   });
+  it('preserves the inactive source family across a save/reopen', () => {
+    // Saved with a web font active, but a system pick (Batang) was made earlier.
+    const saved = { ...DEFAULTS, bodyFont: {
+      source: 'weburl', name: 'Roboto', url: 'https://fonts.googleapis.com/css2?family=Roboto',
+      urlType: 'css', systemFamily: 'Batang', webFamily: 'Roboto' } };
+    const st = settingsToState(saved);
+    expect(st.systemFamily).toBe('Batang'); // system pick survived, not reset to default
+    expect(st.webFamily).toBe('Roboto');
+    // Saving again round-trips BOTH families.
+    const back = stateToSettings(st).bodyFont;
+    expect(back.name).toBe('Roboto');        // active family
+    expect(back.systemFamily).toBe('Batang');
+    expect(back.webFamily).toBe('Roboto');
+  });
   it('effectiveFamily falls back to the URL when the web family field is empty', () => {
     const st = settingsToState({ ...DEFAULTS,
       bodyFont: { source: 'weburl', name: '', url: 'https://fonts.googleapis.com/css2?family=Lora', urlType: 'css' } });

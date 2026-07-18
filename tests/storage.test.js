@@ -95,6 +95,17 @@ describe('body-font self-heal', () => {
     const web = migrate({ bodyFont: { source: 'weburl', name: '', url: 'https://x/f.css', urlType: 'css' } });
     expect(web.bodyFont.name).toBe(''); // weburl empty left as-is
   });
+  it('persists both source families and back-fills them for older settings', () => {
+    const m = migrate({ bodyFont: {
+      source: 'weburl', name: 'Roboto', url: 'https://x/f.css', urlType: 'css',
+      systemFamily: 'Batang', webFamily: 'Roboto' } });
+    expect(m.bodyFont.systemFamily).toBe('Batang'); // inactive source kept
+    expect(m.bodyFont.webFamily).toBe('Roboto');
+    // Legacy settings without the keys: systemFamily back-fills to a real default.
+    const legacy = migrate({ bodyFont: { source: 'weburl', name: 'Lora', url: 'https://x/f.css', urlType: 'css' } });
+    expect(legacy.bodyFont.systemFamily).toBe(DEFAULTS.bodyFont.systemFamily);
+    expect(legacy.bodyFont.webFamily).toBe('Lora'); // active web name back-fills webFamily
+  });
 });
 
 describe('settings validation', () => {
