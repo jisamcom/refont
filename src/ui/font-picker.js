@@ -33,7 +33,8 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
   btn.append(bSamp, bName, cv);
   const panel = el('div', 'fp-panel'); panel.hidden = true;
   const search = el('input', 'fp-search'); search.placeholder = '검색 또는 직접 입력…';
-  const list = el('div', 'fp-list');
+  search.setAttribute('role', 'combobox'); search.setAttribute('aria-autocomplete', 'list'); search.setAttribute('aria-expanded', 'false');
+  const list = el('div', 'fp-list'); list.setAttribute('role', 'listbox');
   panel.append(search, list);
   mount.replaceChildren(btn, panel);
   const labFor = (fam) => { const o = fonts.find((x) => x.f === fam); return o ? (o.ko || o.f).replace(' Variable', '') : labelOf(fam); };
@@ -48,6 +49,8 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
     const f = o.f; const lab = labOf(o);
     const row = document.createElement('div');
     row.className = 'fp-opt' + (f === val ? ' sel' : '');
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', String(f === val));
     const name = span('o-name', lab); name.style.fontFamily = famStack(f);
     const spec = span('o-spec', `${sample} 012`); spec.style.fontFamily = famStack(f);
     row.append(span('o-check', '✓'), name, spec);
@@ -72,16 +75,40 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
     if (typed && !fonts.some((o) => o.f.toLowerCase() === typed.toLowerCase() || (o.ko && o.ko.toLowerCase() === typed.toLowerCase()))) {
       const row = document.createElement('div');
       row.className = 'fp-opt mk';
+      row.setAttribute('role', 'option'); row.setAttribute('aria-selected', 'false');
       row.append(span('o-check', '✓'), span('o-name', `직접 사용: "${typed}"`), span('badge', 'custom'));
       row.onclick = () => pick(typed, true); list.appendChild(row);
     }
     if (!list.children.length) { list.textContent = ''; list.append(span('fp-empty', '결과 없음 — 입력해서 직접 지정하세요')); }
+    active = -1; // reset keyboard highlight whenever the list is rebuilt
   }
-  const open = () => { mount.classList.add('open'); panel.hidden = false; search.value = ''; render(''); search.focus(); };
-  const close = () => { mount.classList.remove('open'); panel.hidden = true; };
+  // Keyboard combobox: Arrow keys move a highlight over the option rows, Enter
+  // picks it (or the first row), Escape closes. Options are click-only <div>s, so
+  // without this they can't be reached by keyboard at all.
+  let active = -1;
+  const rows = () => [...list.querySelectorAll('.fp-opt')];
+  function highlight(i) {
+    const rs = rows();
+    if (!rs.length) { active = -1; return; }
+    active = (i + rs.length) % rs.length;
+    rs.forEach((r, idx) => {
+      const on = idx === active;
+      r.classList.toggle('active', on);
+      r.setAttribute('aria-selected', String(on));
+      if (on) { try { r.scrollIntoView && r.scrollIntoView({ block: 'nearest' }); } catch {} }
+    });
+  }
+  const open = () => { mount.classList.add('open'); panel.hidden = false; search.setAttribute('aria-expanded', 'true'); search.value = ''; render(''); search.focus(); };
+  const close = () => { mount.classList.remove('open'); panel.hidden = true; search.setAttribute('aria-expanded', 'false'); };
   function pick(f, isCustom) { val = f; custom = isCustom; paintBtn(); close(); onChange && onChange(f); }
   btn.onclick = () => (mount.classList.contains('open') ? close() : open());
   search.oninput = () => render(search.value);
+  search.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); highlight(active + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(active - 1); }
+    else if (e.key === 'Enter') { e.preventDefault(); const rs = rows(); (active >= 0 ? rs[active] : rs[0])?.click(); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(); btn.focus(); }
+  });
   document.addEventListener('click', (e) => { if (!mount.contains(e.target)) close(); });
   paintBtn();
   return { get value() { return val; }, refresh: paintBtn };

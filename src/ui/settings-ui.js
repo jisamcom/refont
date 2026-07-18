@@ -34,6 +34,15 @@ export function effectiveFamily(st) {
   return st.webFamily || (st.urlType === 'css' ? familyFromCssUrl(st.url) : '');
 }
 
+// Activate a non-native control (role=switch/checkbox/option on a span/div) with
+// Space/Enter, matching what a native button/checkbox does for free. Space is
+// prevent-defaulted so the page doesn't scroll.
+export function onKeyActivate(el, fn) {
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); fn(e); }
+  });
+}
+
 // ---- pure mapping (unit-tested) ----
 export function settingsToState(s) {
   const bf = s.bodyFont || DEFAULTS.bodyFont;
@@ -422,12 +431,14 @@ export function mountSettingsUI(root, ctx) {
 
   // ---- inline checks ----
   function toggleCheck(el, onChange) {
-    el.addEventListener('click', () => {
+    const act = () => {
       const on = el.getAttribute('aria-checked') !== 'true';
       el.setAttribute('aria-checked', on);
       el.classList.toggle('on', on);
       onChange(on);
-    });
+    };
+    el.addEventListener('click', act);
+    onKeyActivate(el, act); // role="checkbox" span isn't a native control — wire Space/Enter
   }
   toggleCheck($('ckPreserve'), (on) => { state.preserveBold = on; scheduleLiveApply(); });
   toggleCheck($('ckFine'), (on) => {
@@ -838,6 +849,7 @@ export function mountSettingsUI(root, ctx) {
       toggleLbl.textContent = on ? t('toggle.onAll') : t('toggle.offAll');
     });
   }
+  onKeyActivate(toggle, () => toggle.click()); // role="switch" div — Space/Enter operable
 
   // ---- reset to defaults (two-click confirm; resets the form, live-applies, persists on Save) ----
   const resetBtn = $('reset');

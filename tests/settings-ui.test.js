@@ -180,6 +180,18 @@ describe('font pickers', () => {
     batang.closest('.fp-opt').click();
     expect(api.state.systemFamily).toBe('Batang');
   });
+  it('selects a font from the picker by keyboard (open → ArrowDown → Enter)', () => {
+    const root = document.createElement('div');
+    const api = mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1,
+      settings: { ...DEFAULTS, bodyFont: { source: 'system', name: 'Georgia', url: null, urlType: 'css' } },
+      installedFonts: ['Georgia', 'Batang'], monoFonts: ['Consolas'] });
+    root.querySelector('#bodyPicker .fp-btn').click(); // open the panel
+    const search = root.querySelector('#bodyPicker .fp-search');
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(['Georgia', 'Batang']).toContain(api.state.systemFamily); // a real option was chosen
+    expect(root.querySelector('#bodyPicker').classList.contains('open')).toBe(false); // Enter picked + closed
+  });
 });
 
 describe('web font family (system vs web split)', () => {
@@ -269,6 +281,21 @@ describe('scope + protection', () => {
     expect(root.querySelector('#allowlist').value).toBe('sub.example.com'); // exception added...
     expect(root.querySelector('#blocklist').value).toBe('example.com');     // ...parent rule untouched
   });
+  it('operates the checkboxes and the site toggle by keyboard (Space/Enter)', () => {
+    const root = document.createElement('div');
+    const api = mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', currentUrl: 'https://x.com/', tabId: 1,
+      blocked: false, settings: { ...DEFAULTS } });
+    const ck = root.querySelector('#ckPreserve');
+    expect(ck.getAttribute('aria-checked')).toBe('true');
+    ck.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+    expect(ck.getAttribute('aria-checked')).toBe('false'); // Space toggled the checkbox
+    expect(api.state.preserveBold).toBe(false);
+    const toggle = root.querySelector('#toggle');
+    expect(toggle.classList.contains('on')).toBe(true);
+    toggle.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(toggle.classList.contains('on')).toBe(false); // Enter operated the switch
+  });
+
   it('popup toggle shows the global-off state instead of claiming the site is on', () => {
     const root = document.createElement('div');
     mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', currentUrl: 'https://x.com/', tabId: 1,
