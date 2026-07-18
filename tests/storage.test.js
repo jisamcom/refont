@@ -119,3 +119,17 @@ describe('settings validation', () => {
     expect(store.data.width).toBe(200);
   });
 });
+
+describe('language setting', () => {
+  it('defaults to auto', () => {
+    expect(DEFAULTS.language).toBe('auto');
+    expect(normalizeSettings({}).language).toBe('auto');
+  });
+  it('keeps valid values and clamps invalid ones to auto', () => {
+    expect(normalizeSettings({ language: 'ko' }).language).toBe('ko');
+    expect(normalizeSettings({ language: 'en' }).language).toBe('en');
+    expect(normalizeSettings({ language: 'auto' }).language).toBe('auto');
+    expect(normalizeSettings({ language: 'fr' }).language).toBe('auto');
+    expect(normalizeSettings({ language: 42 }).language).toBe('auto');
+  });
+});

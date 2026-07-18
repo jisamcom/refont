@@ -29,11 +29,13 @@ export const DEFAULTS = {
   manualExclusions: {},
   protectionDenylistExtra: [],
   recentFonts: { body: [], code: [] }, // recently picked fonts, per picker kind
+  language: 'auto',  // UI language: 'auto' (follow browser) | 'ko' | 'en'
 };
 
 const WEBFONT_DISPLAYS = new Set(['swap', 'optional', 'auto', 'block', 'fallback']);
 const FONT_SOURCES = new Set(['system', 'weburl']);
 const FONT_URL_TYPES = new Set(['css', 'file']);
+const LANGUAGES = new Set(['auto', 'ko', 'en']);
 
 const isRecord = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 const finiteNumber = (v, fallback, min, max) => {
@@ -109,6 +111,7 @@ export function normalizeSettings(input) {
       body: stringList(recent.body, 5, 200),
       code: stringList(recent.code, 5, 200),
     },
+    language: LANGUAGES.has(s.language) ? s.language : DEFAULTS.language,
   };
 }
 
