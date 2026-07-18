@@ -64,6 +64,17 @@ describe('makeFontPicker', () => {
     expect(stillSelected[0].querySelector('.o-name').textContent).toBe('바탕');
   });
 
+  it('marks only one aria-selected row when the chosen font also appears in 최근', () => {
+    const mount = document.createElement('div');
+    makeFontPicker(mount, { fonts: FONTS, value: 'Georgia', recent: ['Georgia'] });
+    mount.querySelector('.fp-btn').click();
+    // Georgia is rendered in both 최근 and 전체, but a single-select listbox may
+    // carry only one aria-selected=true.
+    const selected = [...mount.querySelectorAll('.fp-opt')].filter((r) => r.getAttribute('aria-selected') === 'true');
+    expect(selected.length).toBe(1);
+    expect(selected[0].querySelector('.o-name').textContent).toBe('Georgia');
+  });
+
   it('does not inject markup from a malicious family name (imported/custom)', () => {
     const evil = 'x"><img src=q onerror="window.__pwned=1">';
     const mount = document.createElement('div');

@@ -52,12 +52,18 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
   const optFor = (fam) => fonts.find((x) => x.f === fam) || { f: fam };
   const labOf = (o) => (o.ko || o.f).replace(' Variable', '');
   const span = (cls, text) => { const s = document.createElement('span'); s.className = cls; if (text != null) s.textContent = text; return s; };
+  // The chosen family is rendered in BOTH the 최근 and 전체 groups, but a
+  // single-select listbox may carry only one aria-selected. Mark the first
+  // occurrence (reset each render) so the duplicate 전체 row isn't also "selected".
+  let selMarked = false;
   function addRow(o) {
     const f = o.f; const lab = labOf(o);
+    const isSel = f === val && !selMarked;
+    if (isSel) selMarked = true;
     const row = document.createElement('div');
-    row.className = 'fp-opt' + (f === val ? ' sel' : '');
+    row.className = 'fp-opt' + (isSel ? ' sel' : '');
     row.setAttribute('role', 'option');
-    row.setAttribute('aria-selected', String(f === val));
+    row.setAttribute('aria-selected', String(isSel));
     const name = span('o-name', lab); name.style.fontFamily = famStack(f);
     const spec = span('o-spec', `${sample} 012`); spec.style.fontFamily = famStack(f);
     row.append(span('o-check', '✓'), name, spec);
@@ -69,6 +75,7 @@ export function makeFontPicker(mount, { fonts, value, sample = 'Aa가', onChange
   }
   function render(q = '') {
     list.replaceChildren();
+    selMarked = false; // at most one aria-selected row per render
     const typed = String(q || '').trim();
     if (!typed) {
       const rec = (typeof recent === 'function' ? recent() : recent) || [];
