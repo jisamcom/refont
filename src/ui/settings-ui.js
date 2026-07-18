@@ -204,8 +204,8 @@ const MARKUP = `<div class="popup" id="popup">
         <label class="lang" id="langRow"><span data-i18n="lang.label">언어</span>
           <select id="langSel">
             <option value="auto" data-i18n="lang.auto">자동</option>
-            <option value="ko">한국어</option>
-            <option value="en">English</option>
+            <option value="ko" data-i18n="lang.ko">한국어</option>
+            <option value="en" data-i18n="lang.en">English</option>
           </select>
         </label>
         <button class="btn-reset" id="reset" data-i18n="footer.reset">기본값으로 초기화</button>
@@ -671,6 +671,9 @@ export function mountSettingsUI(root, ctx) {
   if (langSel) {
     langSel.value = settings.language || 'auto';
     langSel.addEventListener('change', async () => {
+      // Best-effort persist: reload regardless of outcome. If the save failed,
+      // the reload just re-reads the prior language and the selector reflects
+      // that — there's no separate error UI to show here.
       try { await send({ type: MSG.SAVE_SETTINGS, payload: { language: langSel.value } }); } catch {}
       reloadPage();
     });
