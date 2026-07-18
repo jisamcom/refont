@@ -133,13 +133,114 @@ export function cssTarget(tabId, frameId) {
 // per spec — switching would silently break the cascade on Chrome only. The
 // USER-origin sheet here is the reinforcement path precisely *because* user
 // !important outranks author !important regardless of that bug.
-async function applyCssToTab(tabId, css, frameId) {
-  if (!css) return;
-  await browser.scripting.insertCSS({ target: cssTarget(tabId, frameId), css, origin: 'USER' });
+// Serialize the USER-origin sheet swaps per frame. Independent insert/remove
+// messages are async and can complete out of order — a rapid shape-change preview
+// followed by a committed reapply (e.g. on popup close) could otherwise land the
+// stale preview sheet last. Chaining per frame guarantees each replace fully
+// applies before the next starts, and the new sheet is inserted BEFORE the old is
+// removed (both USER !important → newer source order wins) to avoid a flash.
+//
+// Two cross-document hazards are handled beyond ordering:
+//   - `installed` is the authoritative last css WE injected, so a removal targets
+//     what's really there — not the caller's belief (which resets to '' in each
+//     fresh content script) — so a stale sheet can't survive a navigation.
+//   - `owner` is the document that currently holds the frame (see registerCssOwner).
+//     A queued op from a superseded document is discarded, and — because a new
+//     document can register mid-flight — ownership is re-checked after the awaited
+//     browser calls too, so a delayed op can't leak its sheet into the next page.
+const cssState = new Map(); // `${tabId}:${frameId}` → { owner, installedDoc, installed, stale, chain, pending }
+const MAX_STALE_CSS = 8;
+const cssKey = (tabId, frameId) => `${tabId}:${frameId == null ? 'top' : frameId}`;
+function cssStateFor(key) {
+  let st = cssState.get(key);
+  if (!st) { st = { owner: null, installedDoc: null, installed: '', stale: new Set(), chain: Promise.resolve(), pending: 0 }; cssState.set(key, st); }
+  return st;
 }
-async function removeCssFromTab(tabId, css, frameId) {
-  try { await browser.scripting.removeCSS({ target: cssTarget(tabId, frameId), css, origin: 'USER' }); } catch {}
+
+// A document announces itself active (load / BFCache pageshow) → it owns the
+// frame's USER sheet from now on. Applied at message-arrival time (not queued),
+// so any queued op from a prior document is discarded when it later runs.
+export function registerCssOwner(tabId, frameId, docId) {
+  if (docId == null) return;
+  cssStateFor(cssKey(tabId, frameId)).owner = docId;
 }
+
+export function replaceCssSerialized(tabId, frameId, css, docId, scripting = (browser && browser.scripting)) {
+  const key = cssKey(tabId, frameId);
+  const target = cssTarget(tabId, frameId);
+  const st = cssStateFor(key);
+  st.pending += 1;
+  // True once a newer document has registered as this frame's owner. Injected CSS
+  // targets whatever document currently occupies the frame, so once we're no longer
+  // the owner our sheet lands in the WRONG (now-current) document — checked both up
+  // front and again after every awaited browser call (a new owner can register
+  // while insertCSS/removeCSS is in flight).
+  const superseded = () => st.owner != null && docId != null && docId !== st.owner;
+  const chain = st.chain.then(async () => {
+    if (superseded()) return;
+    // A new document must (re)install even identical css: navigation drops its
+    // sheet while `installed` survives here, so dedupe only within one document.
+    const sameDoc = docId != null && docId === st.installedDoc;
+    // Retry is driven purely by `installed` (the last SUCCESSFUL install): a failed
+    // insert never updates it, so a repeat of the same css re-inserts naturally and
+    // a revert to what's already installed is skipped. No `dirty` flag — it was
+    // global, so a failed preview insert made the next revert re-insert the still-
+    // installed committed sheet (a duplicate).
+    const needsInsert = css !== '' && !(sameDoc && css === st.installed);
+    const needsCleanup = st.stale.size > 0 || (st.installed && st.installed !== css) || (css === '' && !!st.installed);
+    if (!needsInsert && !needsCleanup) return;
+    if (!scripting) { if (needsInsert || css === '') { st.installed = css; st.installedDoc = docId; } return; }
+    let inserted = false;
+    if (needsInsert) {
+      // Leave prior state intact on a failed insert so the next apply retries
+      // (no phantom "installed" that suppresses a retry).
+      try { await scripting.insertCSS({ target, css, origin: 'USER' }); inserted = true; }
+      catch { return; }
+    }
+    // Cleanup (separate from insert): remove the replaced sheet + any removal that
+    // failed before. A removal that fails again is kept (bounded) and retried, not
+    // lost — and when only cleanup is needed the current sheet is NOT reinserted.
+    // Removing CSS is safe regardless of who owns the frame now, so it runs before
+    // the ownership recheck below.
+    const toRemove = new Set(st.stale);
+    if (st.installed && st.installed !== css) toRemove.add(st.installed);
+    st.stale.clear();
+    for (const old of toRemove) {
+      if (old === css) continue;
+      try { await scripting.removeCSS({ target, css: old, origin: 'USER' }); }
+      catch { if (st.stale.size < MAX_STALE_CSS) st.stale.add(old); }
+    }
+    // A newer document registered while we awaited insert/removeCSS: our injected
+    // sheet now sits in ITS live document. Strip it and commit no authoritative
+    // state — the new owner's own queued op reinstalls.
+    if (superseded()) {
+      if (inserted && css !== '') {
+        try { await scripting.removeCSS({ target, css, origin: 'USER' }); }
+        catch { if (st.stale.size < MAX_STALE_CSS) st.stale.add(css); }
+      }
+      return;
+    }
+    if (needsInsert) st.installedDoc = docId;
+    if (needsInsert || css === '') st.installed = css;
+  }).catch(() => {}).finally(() => {
+    st.pending -= 1;
+    // Drop the entry once the queue drains with nothing left to track, so a
+    // long-lived worker doesn't accumulate a key per visited frame.
+    if (st.pending === 0 && !st.installed && st.stale.size === 0 && cssState.get(key) === st) cssState.delete(key);
+  });
+  st.chain = chain;
+  return chain;
+}
+
+// Drop all per-frame CSS state for a tab — its documents are gone, so nothing is
+// installed to track. Wired to tabs.onRemoved (normal close/navigation-away).
+export function purgeTabCss(tabId) {
+  const prefix = `${tabId}:`;
+  for (const key of cssState.keys()) if (key.startsWith(prefix)) cssState.delete(key);
+}
+
+// Test hook: number of live per-frame CSS chains.
+export function __cssStateSize() { return cssState.size; }
 
 async function setBadge(tabId, enabled) {
   try {
@@ -176,10 +277,11 @@ if (browser && browser.runtime && browser.runtime.onMessage) {
         return saveSettings(msg.payload).then(async (s) => { await broadcastReapply(); return s; });
       case MSG.FETCH_FONT:
         return fetchFontCached(msg.url);
-      case MSG.APPLY_CSS:
-        return applyCssToTab(tabId, msg.css, frameId);
-      case MSG.REMOVE_CSS:
-        return removeCssFromTab(tabId, msg.css, frameId);
+      case MSG.CSS_REGISTER:
+        registerCssOwner(tabId, frameId, msg.docId || (sender && sender.documentId));
+        return undefined;
+      case MSG.REPLACE_CSS:
+        return replaceCssSerialized(tabId, frameId, msg.css || '', msg.docId || (sender && sender.documentId));
       case MSG.TOGGLE_SITE:
         return toggleSite(msg.url || (sender.tab && sender.tab.url)).then(async (s) => { await broadcastReapply(); return s; });
       default:
@@ -201,5 +303,11 @@ if (browser && browser.runtime && browser.runtime.onMessage) {
       const s = await getSettings();
       setBadge(tabId, s.enabled && !isBlocked(tab.url, s.blocklist));
     });
+  }
+
+  // A closed tab destroys its documents' injected CSS without a teardown message,
+  // so drop its tracked state to keep the worker's map from growing over time.
+  if (browser.tabs && browser.tabs.onRemoved) {
+    browser.tabs.onRemoved.addListener((tabId) => purgeTabCss(tabId));
   }
 }

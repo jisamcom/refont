@@ -8,6 +8,7 @@ vi.mock('webextension-polyfill', () => ({ default: {} }));
 
 import {
   guessFontMime, arrayBufferToBase64, fetchFontAsDataUrl, cssTarget,
+  replaceCssSerialized, registerCssOwner, purgeTabCss, __cssStateSize,
   classifyFontResponse, fetchFontCached, MAX_FONT_BYTES, MAX_FONT_CACHE_ENTRIES,
 } from '../src/background.js';
 
@@ -28,6 +29,154 @@ describe('cssTarget', () => {
   it('falls back to the whole tab (top frame) when frameId is unknown', () => {
     expect(cssTarget(7, undefined)).toEqual({ tabId: 7 });
     expect(cssTarget(7, null)).toEqual({ tabId: 7 });
+  });
+});
+
+describe('replaceCssSerialized', () => {
+  const okScripting = () => ({ insertCSS: vi.fn(() => Promise.resolve()), removeCSS: vi.fn(() => Promise.resolve()) });
+
+  it('serializes per-frame swaps, inserting the new sheet before removing the old', async () => {
+    const order = [];
+    let releaseFirst;
+    const scripting = {
+      insertCSS: vi.fn(({ css }) => {
+        order.push(`insert:${css}`);
+        if (css === 'A') return new Promise((r) => { releaseFirst = r; }); // hang the first insert
+        return Promise.resolve();
+      }),
+      removeCSS: vi.fn(({ css }) => { order.push(`remove:${css}`); return Promise.resolve(); }),
+    };
+    const p1 = replaceCssSerialized(10, 0, 'A', 'd', scripting); // install A (hangs)
+    const p2 = replaceCssSerialized(10, 0, 'B', 'd', scripting); // same doc: A -> B, queued behind
+    await Promise.resolve(); await Promise.resolve();
+    expect(order).toEqual(['insert:A']); // p2 hasn't started - serialized behind p1
+
+    releaseFirst();
+    await p1; await p2;
+    expect(order).toEqual(['insert:A', 'insert:B', 'remove:A']); // new inserted before old removed
+  });
+
+  it('reinstalls identical css for a new document (navigation drops the old sheet)', async () => {
+    const inserted = [];
+    const scripting = { insertCSS: vi.fn(({ css }) => { inserted.push(css); return Promise.resolve(); }), removeCSS: vi.fn(() => Promise.resolve()) };
+    await replaceCssSerialized(20, 0, 'S', 'docA', scripting); // document A installs S
+    await replaceCssSerialized(20, 0, 'S', 'docB', scripting); // NEW document, same settings css
+    expect(inserted).toEqual(['S', 'S']);                      // reinstalled - not skipped as a no-op
+  });
+
+  it('discards an op from a document that no longer owns the frame (registration wins over timing)', async () => {
+    const inserted = [];
+    const scripting = { insertCSS: vi.fn(({ css }) => { inserted.push(css); return Promise.resolve(); }), removeCSS: vi.fn(() => Promise.resolve()) };
+    registerCssOwner(21, 0, 'docB');                              // new document registers as owner
+    await replaceCssSerialized(21, 0, 'STALE', 'docA', scripting); // straggler from the OLD document
+    expect(inserted).toEqual([]);                                // discarded - docA is not the owner
+    await replaceCssSerialized(21, 0, 'NEW', 'docB', scripting);   // the owner installs
+    expect(inserted).toEqual(['NEW']);
+  });
+
+  it('lets a BFCache-restored document reclaim its frame after re-registering', async () => {
+    const inserted = [];
+    const scripting = { insertCSS: vi.fn(({ css }) => { inserted.push(css); return Promise.resolve(); }), removeCSS: vi.fn(() => Promise.resolve()) };
+    registerCssOwner(28, 0, 'A'); await replaceCssSerialized(28, 0, 'a', 'A', scripting); // A active
+    registerCssOwner(28, 0, 'B'); await replaceCssSerialized(28, 0, 'b', 'B', scripting); // navigate to B
+    registerCssOwner(28, 0, 'A'); await replaceCssSerialized(28, 0, 'a', 'A', scripting); // BFCache-restore A
+    expect(inserted).toEqual(['a', 'b', 'a']);                   // A reclaims ownership and reinstalls
+  });
+
+  it('is a no-op only within one document when the css is unchanged', async () => {
+    const scripting = okScripting();
+    await replaceCssSerialized(22, 1, 'X', 'doc', scripting);
+    scripting.insertCSS.mockClear(); scripting.removeCSS.mockClear();
+    await replaceCssSerialized(22, 1, 'X', 'doc', scripting); // same document + same css -> skip
+    expect(scripting.insertCSS).not.toHaveBeenCalled();
+    expect(scripting.removeCSS).not.toHaveBeenCalled();
+  });
+
+  it('does not record a failed insert, so the next apply retries instead of a phantom install', async () => {
+    let failNext = true;
+    const scripting = {
+      insertCSS: vi.fn(() => { if (failNext) { failNext = false; return Promise.reject(new Error('busy')); } return Promise.resolve(); }),
+      removeCSS: vi.fn(() => Promise.resolve()),
+    };
+    await replaceCssSerialized(23, 0, 'X', 'd', scripting); // insert fails
+    await replaceCssSerialized(23, 0, 'X', 'd', scripting); // same css must retry, not dedupe
+    expect(scripting.insertCSS).toHaveBeenCalledTimes(2);
+  });
+
+  it('an op superseded mid-insert strips its own sheet and records no ownership (P2)', async () => {
+    // A new document can register as the frame's owner WHILE our insertCSS is in
+    // flight; our sheet then lands in that document. We must undo it and commit
+    // nothing, so the incoming owner starts clean.
+    let releaseInsert;
+    const inserted = [], removed = [];
+    const scripting = {
+      insertCSS: vi.fn(({ css }) => {
+        inserted.push(css);
+        if (inserted.length === 1) return new Promise((r) => { releaseInsert = r; }); // hang A's insert only
+        return Promise.resolve();
+      }),
+      removeCSS: vi.fn(({ css }) => { removed.push(css); return Promise.resolve(); }),
+    };
+    registerCssOwner(30, 0, 'A');
+    const pA = replaceCssSerialized(30, 0, 'SHEET', 'A', scripting); // insert hangs
+    while (!releaseInsert) await Promise.resolve(); // let the chain reach (and hang at) insertCSS
+    registerCssOwner(30, 0, 'B');           // a new document takes the frame mid-insert
+    releaseInsert();
+    await pA;
+    expect(removed).toContain('SHEET');     // A undid the sheet it put in B's now-live doc
+    const pB = replaceCssSerialized(30, 0, 'SHEET', 'B', scripting); // B installs cleanly
+    await pB;
+    expect(inserted).toEqual(['SHEET', 'SHEET']); // A's (undone) + B's — nothing was deduped away
+  });
+
+  it('does not re-insert the still-installed committed sheet after a failed preview (P2)', async () => {
+    // dirty used to be a global flag: a failed preview insert set it, and the next
+    // revert to the (still-installed) committed sheet re-inserted a duplicate.
+    let failB = true;
+    const inserted = [];
+    const scripting = {
+      insertCSS: vi.fn(({ css }) => {
+        inserted.push(css);
+        if (css === 'B' && failB) { failB = false; return Promise.reject(new Error('preview busy')); }
+        return Promise.resolve();
+      }),
+      removeCSS: vi.fn(() => Promise.resolve()),
+    };
+    registerCssOwner(31, 0, 'd');
+    await replaceCssSerialized(31, 0, 'A', 'd', scripting); // commit A: installed = A
+    await replaceCssSerialized(31, 0, 'B', 'd', scripting); // preview B: insert fails, A still installed
+    await replaceCssSerialized(31, 0, 'A', 'd', scripting); // revert to the committed (already installed) A
+    expect(inserted.filter((c) => c === 'A')).toEqual(['A']); // inserted once — no duplicate USER sheet
+  });
+
+  it('retries a failed removal without reinserting the current sheet to do so', async () => {
+    let failRemove = true;
+    const removed = [];
+    const scripting = {
+      insertCSS: vi.fn(() => Promise.resolve()),
+      removeCSS: vi.fn(({ css }) => { removed.push(css); if (failRemove && css === 'A') { failRemove = false; return Promise.reject(new Error('x')); } return Promise.resolve(); }),
+    };
+    await replaceCssSerialized(24, 0, 'A', 'd', scripting); // install A
+    await replaceCssSerialized(24, 0, 'B', 'd', scripting); // A->B, remove(A) fails -> A kept stale
+    expect(scripting.insertCSS).toHaveBeenCalledTimes(2);
+    await replaceCssSerialized(24, 0, 'B', 'd', scripting); // same B, stale={A}: cleanup only
+    expect(scripting.insertCSS).toHaveBeenCalledTimes(2);  // B NOT reinserted just to retry cleanup
+    expect(removed.filter((c) => c === 'A')).toHaveLength(2); // A removal retried
+  });
+
+  it('drops the per-frame entry once torn down, and purges a closed tab', async () => {
+    const scripting = okScripting();
+    const before = __cssStateSize();
+    await replaceCssSerialized(25, 0, 'S', 'd', scripting);
+    expect(__cssStateSize()).toBe(before + 1);
+    await replaceCssSerialized(25, 0, '', 'd', scripting); // teardown -> nothing installed
+    expect(__cssStateSize()).toBe(before);
+
+    await replaceCssSerialized(26, 0, 'A', 'd', scripting); // an active (still-installed) frame
+    await replaceCssSerialized(26, 1, 'B', 'e', scripting);
+    expect(__cssStateSize()).toBe(before + 2);
+    purgeTabCss(26);                                        // tab closed
+    expect(__cssStateSize()).toBe(before);
   });
 });
 

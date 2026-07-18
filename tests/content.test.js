@@ -47,8 +47,16 @@ const preview = async (settings) => { await messageListener({ type: MSG.PREVIEW_
 // is a clean full scan of the freshly-built fixture.
 const freshApply = (settings) => reapply(settings);
 
-const rootVar = (name) => document.documentElement.style.getPropertyValue(name);
 const sheetText = () => (document.getElementById('__refont_style') || {}).textContent || '';
+// The live/effective engine-var value is the inline fast-path copy on <html>
+// (setVars); the sheet's :root carries a committed copy as a wipe-proof fallback.
+const rootVar = (name) => document.documentElement.style.getPropertyValue(name);
+// The var value as it appears in the injected sheet's :root (survives an <html>
+// inline-style wipe).
+const sheetVar = (name) => {
+  const m = sheetText().match(new RegExp(`${name}\\s*:\\s*([^;}]+)`));
+  return m ? m[1].trim() : '';
+};
 
 beforeAll(async () => {
   globalThis.requestAnimationFrame = (cb) => { cb(); return 0; };
@@ -94,6 +102,39 @@ describe('content var-engine', () => {
     // The element is untouched by the preview — only the variable changed.
     expect(p.style.getPropertyValue('--fc-base-size')).toBe('10px');
     expect(p.style.getPropertyValue('font-size')).toBe('10px'); // author still intact
+  });
+
+  it('a value-only preview updates inline vars without re-injecting the USER sheet (no race/perf regression)', async () => {
+    document.body.innerHTML = '<p id="t">hi</p>';
+    await freshApply(makeSettings({ scale: 2 }));
+    fakeBrowser.runtime.sendMessage.mockClear();
+    await preview(makeSettings({ scale: 3 })); // value-only change; rule shape unchanged
+    expect(rootVar('--refont-scale')).toBe('3'); // live value via inline fast path
+    const cssMsgs = fakeBrowser.runtime.sendMessage.mock.calls
+      .map((c) => c[0] && c[0].type)
+      .filter((t) => t === MSG.REPLACE_CSS);
+    expect(cssMsgs).toEqual([]); // no async USER-sheet insert/remove → no ordering race
+  });
+
+  it('a spacing / line-height value preview also skips USER-sheet re-injection (not just scale)', async () => {
+    document.body.innerHTML = '<p id="t">hi</p>';
+    await freshApply(makeSettings({ letterSpacing: 0.12, lineHeight: 1.5 }));
+    fakeBrowser.runtime.sendMessage.mockClear();
+    await preview(makeSettings({ letterSpacing: 0.13, lineHeight: 1.8 })); // value-only; rule shape stable
+    expect(rootVar('--refont-letter-spacing')).toBe('0.13em');
+    expect(rootVar('--refont-line-height')).toBe('1.8');
+    const cssMsgs = fakeBrowser.runtime.sendMessage.mock.calls
+      .map((c) => c[0] && c[0].type)
+      .filter((t) => t === MSG.REPLACE_CSS);
+    expect(cssMsgs).toEqual([]);
+  });
+
+  it('a committed value change refreshes the sheet :root so wipe-proof vars stay current', async () => {
+    document.body.innerHTML = '<p id="t">hi</p>';
+    await freshApply(makeSettings({ scale: 2 }));
+    expect(sheetVar('--refont-scale')).toBe('2');
+    await reapply(makeSettings({ scale: 3 })); // committed (from storage, not a preview)
+    expect(sheetVar('--refont-scale')).toBe('3');
   });
 
   it('reverts losslessly when disabled — author font-size survives (P1)', async () => {
@@ -159,6 +200,63 @@ describe('content var-engine', () => {
     const ic = document.getElementById('ic');
     expect(ic.hasAttribute('data-fc')).toBe(false);
     expect(ic.style.getPropertyValue('font-size')).toBe('12px');
+  });
+
+  it('keeps engine vars in the sheet :root so a page rewriting <html> style keeps the font (Discord)', async () => {
+    document.body.innerHTML = '<p id="t">hi</p>';
+    await freshApply(makeSettings({ scale: 2 }));
+    // The committed vars live in the sheet's :root (as well as the inline fast path).
+    expect(sheetText()).toMatch(/:root\{[^}]*--refont-body-stack:/);
+    expect(sheetVar('--refont-scale')).toBe('2');
+
+    // Discord's theme manager rewrites documentElement's style, wiping the inline
+    // copy; the sheet's :root copy must survive so the font holds.
+    document.documentElement.setAttribute('style', 'font-size:100%;--custom-zoom:100;');
+    expect(document.documentElement.style.getPropertyValue('--refont-body-stack')).toBe(''); // inline wiped
+    expect(sheetVar('--refont-body-stack')).not.toBe('');                                     // sheet survives
+    expect(sheetVar('--refont-scale')).toBe('2');
+  });
+
+  it('untags an element the moment it becomes contenteditable (before the first keystroke)', async () => {
+    document.body.innerHTML = '<div id="ed">editable soon</div>';
+    await freshApply(makeSettings());
+    const ed = document.getElementById('ed');
+    expect(ed.hasAttribute('data-fc')).toBe(true); // tagged while still a normal element
+    // An editor enables editing in place — no text mutation yet.
+    ed.setAttribute('contenteditable', 'true');
+    await tick();
+    await tick();
+    expect(ed.hasAttribute('data-fc')).toBe(false); // untagged on the attribute change, not on first input
+  });
+
+  it('re-tags an element when contenteditable is turned off', async () => {
+    document.body.innerHTML = '<div id="ed" contenteditable="true">was editable</div>';
+    await freshApply(makeSettings());
+    const ed = document.getElementById('ed');
+    expect(ed.hasAttribute('data-fc')).toBe(false); // editable → untouched
+    ed.setAttribute('contenteditable', 'false');
+    await tick();
+    await tick();
+    expect(ed.hasAttribute('data-fc')).toBe(true); // no longer editable → restyled
+  });
+
+  it('never tags an editable surface or its children, even as text changes (IME/flicker fix)', async () => {
+    // Mutating the element the user is typing into flickers its font (untag/retag
+    // per keystroke) and resets IME composition ('안녕' → 'ㅇ안녕'). An editing
+    // host and its inheriting children must never be tagged.
+    document.body.innerHTML = '<div id="ed" contenteditable="true"><p id="para">seed</p></div>';
+    await freshApply(makeSettings({ scale: 2 }));
+    const ed = document.getElementById('ed');
+    const para = document.getElementById('para');
+    expect(ed.hasAttribute('data-fc')).toBe(false);
+    expect(para.hasAttribute('data-fc')).toBe(false); // editability inherited by the child
+
+    // Simulate a keystroke changing the text — the untag/retag path that flickered.
+    para.textContent = '안녕';
+    await tick();
+    await tick();
+    expect(para.hasAttribute('data-fc')).toBe(false);
+    expect(para.style.getPropertyValue('--fc-base-size')).toBe('');
   });
 
   it('tags nested eligible elements (two-pass read-then-write covers the whole subtree)', async () => {
@@ -305,6 +403,35 @@ describe('content var-engine', () => {
     await tick();
     expect(document.getElementById('t').hasAttribute('data-fc')).toBe(false);
     history.replaceState({}, '', '/');
+  });
+
+  it('re-registers and force-reinstalls the USER sheet on a BFCache restore (unchanged settings)', async () => {
+    document.body.innerHTML = '<p id="t">hi</p>';
+    await freshApply(makeSettings({ scale: 2 }));   // sheet installed, appliedCss set
+    fakeBrowser.runtime.sendMessage.mockClear();
+
+    // BFCache restore: SAME document, SAME settings, no reapply/preview message.
+    // apply() alone would dedupe to a no-op — the frame's dropped sheet must still
+    // be reinstalled, so a REPLACE_CSS (and a re-registration) must be sent anyway.
+    const ev = new Event('pageshow');
+    Object.defineProperty(ev, 'persisted', { get: () => true });
+    window.dispatchEvent(ev);
+    await tick(); await tick(); await tick();
+
+    const sent = fakeBrowser.runtime.sendMessage.mock.calls.map((c) => c[0]).filter(Boolean);
+    expect(sent.some((m) => m.type === MSG.CSS_REGISTER)).toBe(true);   // ownership reclaimed
+    const replaces = sent.filter((m) => m.type === MSG.REPLACE_CSS);
+    expect(replaces.length).toBeGreaterThan(0);                        // sheet re-asserted
+    expect(replaces[replaces.length - 1].css).not.toBe('');            // the active (non-empty) sheet
+  });
+
+  it('ignores a non-persisted pageshow (a normal load already applied)', async () => {
+    document.body.innerHTML = '<p id="t">hi</p>';
+    await freshApply(makeSettings({ scale: 2 }));
+    fakeBrowser.runtime.sendMessage.mockClear();
+    window.dispatchEvent(new Event('pageshow')); // persisted is falsy
+    await tick(); await tick();
+    expect(fakeBrowser.runtime.sendMessage.mock.calls.length).toBe(0);
   });
 
   it('does not return a response promise for REAPPLY (no dangling message channel)', async () => {

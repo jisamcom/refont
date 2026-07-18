@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   sanitizeFamilyName, sanitizeFontDisplay, fontStack, parseAxes, splitTextAxes,
-  buildSkeletonCss, buildDynamicCss, engineVars, elementBase,
+  buildSkeletonCss, buildDynamicCss, buildRootVars, engineVars, elementBase,
 } from '../src/lib/engine.js';
 
 describe('sanitizeFontDisplay', () => {
@@ -68,6 +68,22 @@ describe('buildSkeletonCss', () => {
   });
 });
 
+describe('buildRootVars', () => {
+  it('emits a :root rule with the always-present vars, omitting weight/width when off', () => {
+    const css = buildRootVars({ bodyFont: { name: 'Foo' }, scale: 1.2, minSize: 0, weight: 0, width: 0 });
+    expect(css).toMatch(/^:root\{/);
+    expect(css).toContain('--refont-body-stack:"Foo"');
+    expect(css).toContain('--refont-scale:1.2');
+    expect(css).not.toContain('--refont-weight');
+    expect(css).not.toContain('--refont-width');
+  });
+  it('includes weight and width when the dials are on', () => {
+    const css = buildRootVars({ bodyFont: { name: 'Foo' }, scale: 1, weight: 600, width: 90 });
+    expect(css).toContain('--refont-weight:600');
+    expect(css).toContain('--refont-width:90%');
+  });
+});
+
 describe('buildDynamicCss size gating', () => {
   it('omits the font-size rule when sizing is off (scale 1, min 0) — keeps fluid text', () => {
     expect(buildDynamicCss({ scale: 1, minSize: 0 })).not.toContain('font-size');
@@ -99,12 +115,16 @@ describe('buildDynamicCss', () => {
   it('is identical for different weight *values* (value lives in the variable)', () => {
     expect(buildDynamicCss({ weight: 300, preserveBold: true })).toBe(buildDynamicCss({ weight: 900, preserveBold: true }));
   });
-  it('emits line-height / letter-spacing / word-spacing (em) only when nonzero, skipping code', () => {
+  it('emits line-height / letter-spacing / word-spacing rules (value in a variable) only when nonzero', () => {
     expect(buildDynamicCss({ lineHeight: 0, letterSpacing: 0, wordSpacing: 0 })).toBe('');
     const css = buildDynamicCss({ lineHeight: 1.6, letterSpacing: 0.12, wordSpacing: 0.16 });
-    expect(css).toContain('[data-fc]:not([data-fc-code]){line-height:1.6 !important;}');
-    expect(css).toContain('letter-spacing:0.12em');
-    expect(css).toContain('[data-fc]:not([data-fc-code]){word-spacing:0.16em !important;}');
+    expect(css).toContain('[data-fc]:not([data-fc-code]){line-height:var(--refont-line-height) !important;}');
+    expect(css).toContain('letter-spacing:var(--refont-letter-spacing) !important;');
+    expect(css).toContain('[data-fc]:not([data-fc-code]){word-spacing:var(--refont-word-spacing) !important;}');
+  });
+  it('is identical for different spacing *values* (value lives in the variable, not the rule)', () => {
+    expect(buildDynamicCss({ letterSpacing: 0.12 })).toBe(buildDynamicCss({ letterSpacing: 0.13 }));
+    expect(buildDynamicCss({ lineHeight: 1.5 })).toBe(buildDynamicCss({ lineHeight: 1.8 }));
   });
   it('routes registered axes to standard props and customs to font-variation-settings', () => {
     expect(buildDynamicCss({ axes: '' })).not.toContain('font-variation-settings');
@@ -123,6 +143,28 @@ describe('buildDynamicCss', () => {
     const css = buildDynamicCss({ width: 120, axes: 'wdth 80' });
     expect(css).toContain('font-stretch:var(--refont-width) !important;');
     expect(css).not.toContain('font-stretch:80%');
+  });
+
+  // Refont's overrides can cascade into form controls via `font: inherit`. Only
+  // the non-`font`-shorthand properties are safe to neutralize (see engine.js).
+  it('leaves form controls alone when no neutralizable feature is on', () => {
+    expect(buildDynamicCss({ weight: 0, letterSpacing: 0, wordSpacing: 0, width: 0, lineHeight: 0 }))
+      .not.toContain(':where(');
+  });
+  it('never blanket-resets font-shorthand props (weight/line-height/stretch) on form controls', () => {
+    // A reset strong enough to beat `font: inherit` would also clobber explicit
+    // author form styling, so these emit NO form-control rule at all.
+    expect(buildDynamicCss({ weight: 700, lineHeight: 1.6, width: 90 })).not.toContain(':where(');
+  });
+  it('cancels only inherited tracking/FVS via 0-specificity :where (never !important)', () => {
+    const css = buildDynamicCss({ letterSpacing: 0.12, wordSpacing: 0.16 });
+    const ls = css.split('\n').find((l) => l.startsWith(':where(') && l.includes('letter-spacing'));
+    expect(ls).toContain('input');
+    expect(ls).toContain('textarea');
+    expect(ls).toContain('[contenteditable]:not([contenteditable="false"])');
+    expect(ls).toContain('letter-spacing:normal;');
+    expect(ls).not.toContain('!important'); // loses to any explicit author rule
+    expect(css).toContain('word-spacing:normal;');
   });
   it('emits font-optical-sizing:none only when opticalSizing is none (auto = browser default)', () => {
     expect(buildDynamicCss({ opticalSizing: 'auto' })).not.toContain('font-optical-sizing');

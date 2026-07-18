@@ -101,6 +101,22 @@ export function sizingActive(settings) {
 // stylesheet swap, no DOM walk. Weight respects preserveBold by selecting
 // buckets: light always, bold only when not preserving. size/line-height/
 // letter-spacing/axes skip code or follow the original behaviour.
+// Refont restyles *displayed* text. Some of its overrides also cascade into form
+// controls / editing surfaces that opt in with `font: inherit`, and the added
+// horizontal tracking can shift their metrics (a padded search field offsets).
+// We can safely neutralize only the properties NOT in the `font` shorthand
+// (letter-spacing, word-spacing, font-variation-settings, font-optical-sizing):
+// `font: inherit` doesn't set them, so the control has no competing declaration,
+// and a 0-specificity `:where()` reset (never !important) cancels ONLY the
+// inherited value while losing to any explicit author rule.
+//
+// The `font`-shorthand properties (weight, line-height, stretch, style) are left
+// alone on purpose: a reset strong enough to beat `font: inherit` there would
+// also override a page's explicit form styling, breaking control height/weight
+// across a whole design system. Font-family and font-size are likewise untouched.
+const FORM_SEL = 'input,textarea,select,button,optgroup,option,[contenteditable]:not([contenteditable="false"])';
+const neutralize = (prop, value) => `:where(${FORM_SEL}){${prop}:${value};}`;
+
 export function buildDynamicCss(settings) {
   const s = settings || {};
   const rules = [];
@@ -112,14 +128,19 @@ export function buildDynamicCss(settings) {
     rules.push('[data-fc-wlight]{font-weight:var(--refont-weight) !important;}');
     if (s.preserveBold === false) rules.push('[data-fc-wbold]{font-weight:var(--refont-weight) !important;}');
   }
+  // line-height / letter-spacing / word-spacing carry their value in a variable
+  // (like scale/weight) so dragging those sliders is a var update, not a rule-shape
+  // change — a preview then never re-injects the async USER stylesheet.
   if (s.lineHeight && s.lineHeight > 0) {
-    rules.push(`[data-fc]:not([data-fc-code]){line-height:${s.lineHeight} !important;}`);
+    rules.push('[data-fc]:not([data-fc-code]){line-height:var(--refont-line-height) !important;}');
   }
   if (s.letterSpacing && s.letterSpacing !== 0) {
-    rules.push(`[data-fc]:not([data-fc-code]){letter-spacing:${s.letterSpacing}em !important;}`);
+    rules.push('[data-fc]:not([data-fc-code]){letter-spacing:var(--refont-letter-spacing) !important;}');
+    rules.push(neutralize('letter-spacing', 'normal'));
   }
   if (s.wordSpacing && s.wordSpacing > 0) {
-    rules.push(`[data-fc]:not([data-fc-code]){word-spacing:${s.wordSpacing}em !important;}`);
+    rules.push('[data-fc]:not([data-fc-code]){word-spacing:var(--refont-word-spacing) !important;}');
+    rules.push(neutralize('word-spacing', 'normal'));
   }
   // Width dial → font-stretch via a variable (cheap to drag, like weight).
   if ((s.width || 0) > 0) {
@@ -129,6 +150,7 @@ export function buildDynamicCss(settings) {
   // 'none' needs a rule to switch automatic optical sizing off.
   if (s.opticalSizing === 'none') {
     rules.push('[data-fc]:not([data-fc-code]){font-optical-sizing:none !important;}');
+    rules.push(neutralize('font-optical-sizing', 'auto'));
   }
   // Free-text axes: registered axes as standard properties, custom as FVS.
   const { std, custom } = splitTextAxes(s);
@@ -138,6 +160,7 @@ export function buildDynamicCss(settings) {
   }
   if (custom.length) {
     rules.push(`[data-fc]:not([data-fc-code]){font-variation-settings:${custom.join(',')} !important;}`);
+    rules.push(neutralize('font-variation-settings', 'normal'));
   }
   return rules.join('\n');
 }
@@ -154,10 +177,28 @@ export function engineVars(settings) {
   };
   if ((s.weight || 0) > 0) vars['--refont-weight'] = String(s.weight);
   if ((s.width || 0) > 0) vars['--refont-width'] = `${s.width}%`;
+  if (s.lineHeight && s.lineHeight > 0) vars['--refont-line-height'] = String(s.lineHeight);
+  if (s.letterSpacing && s.letterSpacing !== 0) vars['--refont-letter-spacing'] = `${s.letterSpacing}em`;
+  if (s.wordSpacing && s.wordSpacing > 0) vars['--refont-word-spacing'] = `${s.wordSpacing}em`;
   return vars;
 }
 
-export const ENGINE_VAR_NAMES = ['--refont-body-stack', '--refont-code-stack', '--refont-scale', '--refont-min', '--refont-weight', '--refont-width'];
+export const ENGINE_VAR_NAMES = [
+  '--refont-body-stack', '--refont-code-stack', '--refont-scale', '--refont-min',
+  '--refont-weight', '--refont-width', '--refont-line-height', '--refont-letter-spacing', '--refont-word-spacing',
+];
+
+// The engine variables as a `:root{}` rule for the injected stylesheet. Carrying
+// them IN the sheet (rather than as inline style on <html>) is what makes them
+// survive a page that rewrites documentElement's style attribute — e.g. Discord's
+// theme manager, which otherwise wipes --refont-* and collapses
+// `font-family:var(--refont-body-stack)` to the inherited page font — and, being
+// part of the USER-origin sheet, survive a CSP that blocks an injected <style>.
+export function buildRootVars(settings) {
+  const vars = engineVars(settings);
+  const decls = ENGINE_VAR_NAMES.filter((k) => k in vars).map((k) => `${k}:${vars[k]}`);
+  return decls.length ? `:root{${decls.join(';')};}` : '';
+}
 
 // Classify a tagged element from its *original* computed font props. sizePx>0
 // → the element carries --fc-base-size and the scaling rule applies. The weight

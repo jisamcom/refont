@@ -3,8 +3,8 @@ import browser from 'webextension-polyfill';
 import { MSG } from './lib/messaging.js';
 import { effectivePageUrl, isBlocked } from './lib/url-match.js';
 import {
-  buildSkeletonCss, buildDynamicCss, engineVars, elementBase, ENGINE_VAR_NAMES,
-  sanitizeFamilyName, sanitizeFontDisplay,
+  buildSkeletonCss, buildDynamicCss, buildRootVars, engineVars, ENGINE_VAR_NAMES,
+  elementBase, sanitizeFamilyName, sanitizeFontDisplay,
 } from './lib/engine.js';
 import { shouldProtect, hasIconClassHint, isProtectedFamily } from './lib/font-protection.js';
 import { directText, isCodeElement, dedupeRoots } from './lib/dom-utils.js';
@@ -14,8 +14,28 @@ import { needsFullRescan } from './lib/apply-plan.js';
 
 let settings = null;
 let observer = null;
-let appliedCss = '';
+let appliedCss = '';      // the full injected sheet (vars + rules)
+let appliedRules = '';    // just the rule half — a value-only preview leaves this unchanged
 let applyGeneration = 0;
+// A unique id for this document's lifetime. The document registers it with the
+// background (on load and BFCache pageshow) to own its frame's USER sheet, so a
+// delayed swap from a superseded document is dropped and a new document reinstalls
+// even identical css. Prefer a real UUID; fall back where crypto is unavailable.
+const CSS_DOC_ID = (() => {
+  try { if (globalThis.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch {}
+  return `${Date.now()}.${Math.random()}`;
+})();
+function registerCssDoc() {
+  return browser.runtime.sendMessage({ type: MSG.CSS_REGISTER, docId: CSS_DOC_ID }).catch(() => {});
+}
+// Re-assert this document's USER sheet unconditionally, bypassing replaceCss's
+// local no-op guard. A BFCache restore keeps our local appliedCss, so apply()
+// alone sends nothing — yet the background may hold another document's sheet for
+// this frame (or none, if ours was dropped on navigate-away). Sending the current
+// appliedCss (including '' when disabled) re-installs ours / evicts theirs.
+function forceReplaceCss() {
+  browser.runtime.sendMessage({ type: MSG.REPLACE_CSS, css: appliedCss, docId: CSS_DOC_ID }).catch(() => {});
+}
 const pageFontFamilies = new Map();
 const MAX_PAGE_FONT_FAMILIES = 100;
 const STATIC_STYLE_ID = '__refont_style';
@@ -58,6 +78,26 @@ function pseudoFamily(el, which) {
   try { return getComputedStyle(el, which).fontFamily; } catch { return ''; }
 }
 
+// A live editing surface: a contenteditable host, a child that inherits its
+// editability, or a native form control. `isContentEditable` is the spec signal;
+// the attribute-selector fallback covers engines/jsdom where it's unreliable and
+// catches inheriting children (a <p> inside a contenteditable has no attribute
+// of its own). Form controls hold their value outside the DOM text, so they're
+// never tagged directly — but we exclude them here for symmetry and clarity.
+function isEditableHost(el) {
+  const ce = el.isContentEditable;
+  if (ce === true) return true;
+  // A spec-compliant engine resolves editability (inheritance included) into a
+  // boolean, so `false` is authoritative — no ancestor walk needed on the common
+  // (non-editable) path. Only when the property is unsupported (undefined, e.g.
+  // jsdom) do we fall back to a contenteditable-ancestor lookup.
+  if (ce === undefined) {
+    try { if (el.closest && el.closest('[contenteditable]:not([contenteditable="false"])')) return true; } catch {}
+  }
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'OPTION';
+}
+
 // READ + DECIDE only (no DOM writes). Returns a tag plan or null to skip.
 // Keeping all getComputedStyle reads in a write-free pass avoids layout
 // thrashing (a write between reads forces a synchronous reflow on the next
@@ -67,6 +107,11 @@ function pseudoFamily(el, which) {
 function classifyElement(el) {
   if (!el || el.nodeType !== 1 || SKIP_TAGS.has(el.tagName)) return null;
   if (el.hasAttribute('data-fc')) return null;
+  // Never restyle a live editing surface. Writing our attributes/--fc-base-size
+  // to a contenteditable (or a child that inherits editability) mutates the DOM
+  // the browser/editor is composing into: it flickers the font on every keystroke
+  // (untag→retag) and can reset an in-flight IME composition ('안녕'→'ㅇ안녕').
+  if (isEditableHost(el)) return null;
   if (PROFILE) profVisited += 1;
   const text = directText(el);
   if (!text || !text.trim()) return null; // only opt-in elements that hold real text
@@ -269,9 +314,13 @@ function startObserver() {
       if (m.type === 'characterData' && m.target.parentElement) pendingReclassify.add(m.target.parentElement);
       // A class/style change can also restyle descendants (descendant selectors,
       // inheritance), so it's expanded to its text-bearing subtree at flush time.
+      // A `contenteditable` toggle flips whether the subtree is an editing surface
+      // — it must untag (on enable) or re-tag (on disable) BEFORE the first
+      // keystroke, so it's observed and reclassified the same way.
       if (m.type === 'attributes') {
-        // Ignore style records caused solely by Refont's own custom properties;
-        // otherwise setVars()/tagElement() would schedule an endless re-scan.
+        // Ignore style records caused solely by Refont's own custom properties
+        // (setVars' --refont-* / tagElement's --fc-base-size); otherwise they'd
+        // schedule an endless re-scan.
         if (m.attributeName === 'style'
           && stripRefontStyle(m.oldValue) === stripRefontStyle(m.target.getAttribute('style'))) continue;
         pendingAttrTargets.add(m.target);
@@ -281,7 +330,7 @@ function startObserver() {
   });
   observer.observe(document.documentElement, {
     childList: true, subtree: true, characterData: true,
-    attributes: true, attributeOldValue: true, attributeFilter: ['class', 'style'],
+    attributes: true, attributeOldValue: true, attributeFilter: ['class', 'style', 'contenteditable'],
   });
 }
 
@@ -343,7 +392,12 @@ function clearMarks() {
   for (const el of document.querySelectorAll('[data-fc]')) untagElement(el);
 }
 
-// ---- engine variables (live values driven through CSS custom properties) ----
+// ---- engine variables ----
+// The committed values live in the sheet's :root (buildSheet), which is immune to
+// a page that rewrites <html>'s inline style. These inline copies are only the
+// fast path for live previews: a slider drag updates one inline property and
+// overrides the sheet, so a preview never re-injects the (async, USER-origin)
+// stylesheet. On a page that wipes them the sheet's committed values take over.
 function setVars(s) {
   const root = document.documentElement;
   const vars = engineVars(s);
@@ -386,9 +440,28 @@ function removeStaticStyle() {
   if (style) style.remove();
 }
 
-// The full author/user-origin rule sheet for the current settings.
-function buildSheet(s) {
+// Swap the async USER-origin reinforcement sheet. The background serializes the
+// insert/remove per frame (keyed by our document token), inserting the new sheet
+// before removing what it last installed — so a preview and a committed reapply
+// can't race and leave the stale one installed. `prev` is only a local guard to
+// skip a no-op send; the background tracks the authoritative installed css itself.
+// The in-page <style> (injectStaticStyle) is the synchronous, always-current half.
+function replaceCss(css, prev) {
+  if (css === prev) return;
+  browser.runtime.sendMessage({ type: MSG.REPLACE_CSS, css, docId: CSS_DOC_ID }).catch(() => {});
+}
+
+// The rule half of the sheet (shape depends on which features are on, not their
+// values). A value-only preview leaves this identical, so no re-inject is needed.
+function buildRules(s) {
   return `${buildSkeletonCss()}\n${buildDynamicCss(s)}`;
+}
+
+// The full sheet: engine vars in a `:root{}` rule (not inline on <html>) so a page
+// that rewrites documentElement's style — Discord's theme manager wipes it — can't
+// drop them and collapse font-family to the page's own font, then the rules.
+function buildSheet(s) {
+  return `${buildRootVars(s)}\n${buildRules(s)}`;
 }
 
 // Tear down a previous application: stop the observer, untag elements, drop our
@@ -401,7 +474,10 @@ function teardown() {
   clearMarks();
   clearVars();
   removeStaticStyle();
-  if (appliedCss) { browser.runtime.sendMessage({ type: MSG.REMOVE_CSS, css: appliedCss }).catch(() => {}); appliedCss = ''; }
+  // The USER-sheet removal is issued by the caller (applyFull) so an active
+  // re-apply can insert-then-remove in ONE serialized op (no author-less gap).
+  appliedCss = '';
+  appliedRules = '';
   const oldWebFont = document.getElementById('__refont_webfont'); if (oldWebFont) oldWebFont.remove();
 }
 
@@ -410,10 +486,12 @@ function teardown() {
 function applyFull(next, generation) {
   settings = next;
   const active = settings.enabled && !isBlocked(pageUrl, settings.blocklist);
+  const prevCss = appliedCss; // capture before teardown clears it
   teardown();
-  if (!active) return;
+  if (!active) { replaceCss('', prevCss); return; }
 
   setVars(settings);
+  appliedRules = buildRules(settings);
   appliedCss = buildSheet(settings);
 
   // --- fast path (synchronous): the rule sheet, the variables and the first
@@ -427,26 +505,32 @@ function applyFull(next, generation) {
   // --- reinforcement (async; does not gate first paint) ---
   // User-origin sheet: its !important outranks author !important on the rare page
   // that forces font-family on body text. The synchronous sheet above already
-  // covers the common case instantly.
-  browser.runtime.sendMessage({ type: MSG.APPLY_CSS, css: appliedCss }).catch(() => {});
+  // covers the common case instantly. One serialized swap (insert new, then remove
+  // the prior sheet) so there's no author-less gap.
+  replaceCss(appliedCss, prevCss);
 }
 
 // Cheap path: only style *values* changed (scale/weight/spacing/axes/family).
-// Re-set the variables (O(1)) and swap the rule sheet only if its *shape* changed
-// (weight on-off, preserveBold, line-height/letter-spacing/axes on-off). No DOM
-// walk, no getComputedStyle — this is what makes dragging a slider on a large
-// page cheap.
-function applyValues(next) {
+// Update the inline vars (O(1), no DOM walk) so a live preview is instant and
+// never touches the async USER stylesheet. Re-inject the sheet only when the rule
+// SHAPE changes (a feature toggled on/off) or when the change is committed (from
+// storage, not a transient preview) — that keeps the sheet's :root committed
+// values current for pages that wipe the inline copy, without a per-preview
+// insert/remove race on the USER sheet.
+function applyValues(next, commit) {
   settings = next;
   setVars(settings);
   warmFonts();
-  const css = buildSheet(settings);
-  if (css !== appliedCss) {
-    injectStaticStyle(css);
-    const prev = appliedCss;
-    appliedCss = css;
-    browser.runtime.sendMessage({ type: MSG.APPLY_CSS, css }).catch(() => {});
-    if (prev) browser.runtime.sendMessage({ type: MSG.REMOVE_CSS, css: prev }).catch(() => {});
+  const rules = buildRules(settings);
+  if (rules !== appliedRules || commit) {
+    const css = `${buildRootVars(settings)}\n${rules}`;
+    if (css !== appliedCss) {
+      injectStaticStyle(css);
+      const prev = appliedCss;
+      appliedCss = css;
+      appliedRules = rules;
+      replaceCss(css, prev);
+    }
   }
 }
 
@@ -458,10 +542,13 @@ async function apply(override, { full = false } = {}) {
   refreshPageScope();
   const next = override || await getSettings();
   if (generation !== applyGeneration) return;
+  // A preview passes transient settings via `override`; a storage-sourced apply
+  // (no override) is a committed change that should refresh the sheet's vars.
+  const commit = override == null;
   if (full || needsFullRescan(settings, next) || !appliedCss) {
     applyFull(next, generation);
   } else {
-    applyValues(next);
+    applyValues(next, commit);
   }
 }
 
@@ -498,7 +585,25 @@ browser.runtime.onMessage.addListener((msg) => {
   return undefined;
 });
 
+registerCssDoc();        // own this frame's USER sheet before the first apply
 apply().catch(() => {});
+
+// BFCache: a restored document didn't re-run this script, and its USER sheet was
+// removed when we navigated away. Re-register (reclaim ownership), re-apply, then
+// FORCE one replace: the restored appliedCss is unchanged, so apply()'s local
+// dedupe would send nothing and the sheet would never be reinstalled. Ordered so
+// the owner is reclaimed before the forced sheet lands. Only on a persisted show —
+// a normal load already applied above.
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('pageshow', (e) => {
+    if (!(e && e.persisted)) return;
+    (async () => {
+      await registerCssDoc();
+      await apply();
+      forceReplaceCss();
+    })().catch(() => {});
+  });
+}
 
 // SPA navigation triggers (permission-free; no webNavigation). popstate covers
 // back/forward everywhere. For pushState/replaceState the Navigation API's
