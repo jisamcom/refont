@@ -84,6 +84,13 @@ patch('public/manifest.chrome.json', setJsonVersion);
 patch('public/manifest.firefox.json', setJsonVersion);
 patch('src/ui/settings-ui.js', (s) => s.replace(/(<span class="ver">v)[^<]*(<\/span>)/, `$1${version}$2`));
 
+// Sync the lockfile's root version to match package.json so the committed
+// package-lock.json (bundled into the source zip) doesn't lag behind. Only the
+// root version field changes — deps are unaffected — since package.json's ranges
+// didn't move. Uses npm (bun can't write package-lock.json).
+console.log('  syncing package-lock.json');
+run('npm install --package-lock-only --ignore-scripts');
+
 // ---- build + package ----
 console.log('\n▶ Building + packaging…');
 run(CMD.build);
