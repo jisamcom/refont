@@ -10,15 +10,43 @@ import { labelOf, toOptions } from './font-names.js';
 import { makeFontPicker } from './font-picker.js';
 import { resolveLocale, createT } from '../lib/i18n.js';
 
+// Extract a font family from a stylesheet URL — specifically a Google Fonts
+// `?family=Open+Sans:wght@400;700` (or a plain `?family=Roboto`). '+' is a space,
+// the `:axes` spec is dropped, and only the first family is taken. '' when there's
+// no family param (a non-Google CSS URL), so the caller can fall back to a
+// user-typed name.
+export function familyFromCssUrl(url) {
+  try {
+    const fam = new URL(url).searchParams.get('family');
+    if (!fam) return '';
+    return fam.split(':')[0].replace(/\+/g, ' ').trim();
+  } catch { return ''; }
+}
+
+// The family currently in effect for a state, honouring the source: the picker's
+// system family, or the web family (a file webfont's typed name, or a CSS link's
+// family derived from the URL, falling back to a typed name for non-Google URLs).
+export function effectiveFamily(st) {
+  if (st.source !== 'weburl') return st.systemFamily || DEFAULTS.bodyFont.name;
+  // The web family field is authoritative (auto-filled from a Google Fonts URL,
+  // still editable); fall back to deriving it from a CSS URL when the field is
+  // empty so a freshly loaded Google link still resolves.
+  return st.webFamily || (st.urlType === 'css' ? familyFromCssUrl(st.url) : '');
+}
+
 // ---- pure mapping (unit-tested) ----
 export function settingsToState(s) {
   const bf = s.bodyFont || DEFAULTS.bodyFont;
+  const source = bf.source || 'system';
   return {
     enabled: s.enabled,
-    source: bf.source || 'system',
-    // Never leave the body family empty: the picker only *displays* a default,
-    // so an empty state would be saved verbatim and force generic sans-serif.
-    family: bf.name || DEFAULTS.bodyFont.name,
+    source,
+    // system and web families are tracked separately so switching source (or
+    // hiding the web family field in CSS-link mode) can't apply one where the
+    // other is meant. The system family never goes empty (the picker only shows a
+    // default, which would otherwise be saved as generic sans-serif).
+    systemFamily: (source === 'system' ? bf.name : '') || DEFAULTS.bodyFont.name,
+    webFamily: source === 'weburl' ? (bf.name || '') : '',
     url: bf.url || '',
     urlType: bf.urlType || 'css',
     webfontDisplay: s.webfontDisplay || 'swap',
@@ -42,7 +70,7 @@ export function settingsToState(s) {
 export function stateToSettings(st) {
   return {
     enabled: st.enabled,
-    bodyFont: { source: st.source, name: st.family, url: st.source === 'weburl' ? st.url : null, urlType: st.urlType },
+    bodyFont: { source: st.source, name: effectiveFamily(st), url: st.source === 'weburl' ? st.url : null, urlType: st.urlType },
     webfontDisplay: st.webfontDisplay,
     codeFont: st.codeEnabled && st.codeFamily ? { source: 'system', name: st.codeFamily, url: null, urlType: 'css' } : null,
     scale: st.scale, minSize: st.minSize, weight: st.weight, weightFine: st.weightFine,
@@ -266,7 +294,7 @@ export function mountSettingsUI(root, ctx) {
   let scheduleLiveApply = () => {};
 
   function applyPreview() {
-    const fam = "'" + state.family + "', system-ui, sans-serif";
+    const fam = "'" + effectiveFamily(state) + "', system-ui, sans-serif";
     const w = String(state.weight || 400);
     const ls = state.letterSpacing ? state.letterSpacing + 'em' : '';
     const ws = state.wordSpacing > 0 ? state.wordSpacing + 'em' : '';
@@ -301,7 +329,7 @@ export function mountSettingsUI(root, ctx) {
     // {b:true} → <b>; plain → text. Built with DOM nodes so a custom font name
     // (user input in state.family) can never inject markup here.
     const parts = [
-      { b: true, t: labelOf(state.family) },
+      { b: true, t: labelOf(effectiveFamily(state)) },
       { b: true, t: state.scale.toFixed(2) + '×' },
       { b: true, t: String(state.weight) },
     ];
@@ -475,10 +503,10 @@ export function mountSettingsUI(root, ctx) {
   function buildPickers() {
     bp = makeFontPicker($('bodyPicker'), {
       fonts: toOptions(bodyFams),
-      value: state.family || 'Pretendard Variable',
+      value: state.systemFamily || 'Pretendard Variable',
       sample: 'Aa가',
       recent: () => state.recentFonts.body,
-      onChange: (f) => { state.family = f; pushRecent('body', f); applyPreview(); scheduleLiveApply(); },
+      onChange: (f) => { state.systemFamily = f; pushRecent('body', f); applyPreview(); scheduleLiveApply(); },
     });
     cp = makeFontPicker($('codePicker'), {
       fonts: toOptions(monoFams),
@@ -535,7 +563,10 @@ export function mountSettingsUI(root, ctx) {
     [...$('webTypeSeg').querySelectorAll('button')].forEach((b) => {
       b.setAttribute('aria-selected', String(b.dataset.wt === urlType));
     });
-    $('webFamilyWrap').hidden = (urlType !== 'file');
+    // Web family is needed in BOTH modes: a file webfont has no family metadata we
+    // can read, and a CSS link's family must match the @font-face it defines. For
+    // a Google Fonts link it's auto-derived from the URL (below), still editable.
+    $('webFamilyWrap').hidden = false;
     $('webUrl').placeholder = (urlType === 'file')
       ? 'https://example.com/font.woff2'
       : 'https://fonts.googleapis.com/css2?family=…';
@@ -550,9 +581,17 @@ export function mountSettingsUI(root, ctx) {
 
   // ---- web inputs ----
   $('webUrl').value = state.url;
-  $('webUrl').addEventListener('input', (e) => { state.url = e.target.value; });
-  $('webFamily').value = (state.source === 'weburl') ? state.family : '';
-  $('webFamily').addEventListener('input', (e) => { state.family = e.target.value; });
+  $('webUrl').addEventListener('input', (e) => {
+    state.url = e.target.value;
+    // Auto-fill the family from a Google Fonts URL, but only when the field is
+    // empty so a deliberate override is never clobbered.
+    if (state.urlType === 'css' && !state.webFamily) {
+      const derived = familyFromCssUrl(state.url);
+      if (derived) { state.webFamily = derived; $('webFamily').value = derived; }
+    }
+  });
+  $('webFamily').value = state.webFamily || '';
+  $('webFamily').addEventListener('input', (e) => { state.webFamily = e.target.value; });
 
   // font-display: optional (file URL only) — minimizes layout shift on swap.
   const ckOptional = $('ckOptional');

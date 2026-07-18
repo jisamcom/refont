@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 vi.mock('webextension-polyfill', () => ({ default: { runtime: {} } }));
 import browserMock from 'webextension-polyfill';
-import { settingsToState, stateToSettings, previewSize, mountSettingsUI } from '../src/ui/settings-ui.js';
+import { settingsToState, stateToSettings, previewSize, mountSettingsUI, familyFromCssUrl } from '../src/ui/settings-ui.js';
 import { DEFAULTS } from '../src/lib/storage.js';
 import { MSG } from '../src/lib/messaging.js';
 
@@ -16,7 +16,7 @@ describe('settingsToState / stateToSettings', () => {
       codeFont: { source: 'system', name: 'Consolas', url: null, urlType: 'css' },
       blocklist: ['a.com'], protectionDenylistExtra: ['my-icons'] };
     const st = settingsToState(s);
-    expect(st.family).toBe('Batang');
+    expect(st.systemFamily).toBe('Batang');
     expect(st.codeEnabled).toBe(true);
     expect(st.codeFamily).toBe('Consolas');
     expect(st.blocklist).toEqual(['a.com']);
@@ -168,7 +168,7 @@ describe('live preview wiring', () => {
 });
 
 describe('font pickers', () => {
-  it('mounts body + code pickers and updates state.family on pick', () => {
+  it('mounts body + code pickers and updates state.systemFamily on pick', () => {
     const root = document.createElement('div');
     const api = mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1,
       settings: { ...DEFAULTS, bodyFont: { source: 'system', name: 'Georgia', url: null, urlType: 'css' } },
@@ -178,7 +178,40 @@ describe('font pickers', () => {
     root.querySelector('#bodyPicker .fp-btn').click();
     const batang = [...root.querySelectorAll('#bodyPicker .o-name')].find((n) => n.textContent === '바탕');
     batang.closest('.fp-opt').click();
-    expect(api.state.family).toBe('Batang');
+    expect(api.state.systemFamily).toBe('Batang');
+  });
+});
+
+describe('web font family (system vs web split)', () => {
+  it('familyFromCssUrl extracts a Google Fonts family (axes stripped, + → space)', () => {
+    expect(familyFromCssUrl('https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;700&display=swap')).toBe('Open Sans');
+    expect(familyFromCssUrl('https://fonts.googleapis.com/css?family=Roboto')).toBe('Roboto');
+    expect(familyFromCssUrl('https://example.com/style.css')).toBe(''); // non-Google → no family param
+    expect(familyFromCssUrl('not a url')).toBe('');
+  });
+  it('a CSS-link source saves the URL-derived family, not the system picker family', () => {
+    const st = settingsToState({ ...DEFAULTS,
+      bodyFont: { source: 'weburl', name: 'Roboto', url: 'https://fonts.googleapis.com/css2?family=Roboto', urlType: 'css' } });
+    expect(st.systemFamily).toBe(DEFAULTS.bodyFont.name); // system family untouched
+    expect(st.webFamily).toBe('Roboto');
+    // Even if a leftover systemFamily is present, the saved body name is the web font.
+    st.systemFamily = 'Pretendard Variable';
+    expect(stateToSettings(st).bodyFont.name).toBe('Roboto');
+  });
+  it('effectiveFamily falls back to the URL when the web family field is empty', () => {
+    const st = settingsToState({ ...DEFAULTS,
+      bodyFont: { source: 'weburl', name: '', url: 'https://fonts.googleapis.com/css2?family=Lora', urlType: 'css' } });
+    expect(stateToSettings(st).bodyFont.name).toBe('Lora');
+  });
+  it('auto-fills the web family field from a pasted Google Fonts URL (options)', () => {
+    const root = document.createElement('div');
+    const api = mountSettingsUI(root, { context: 'options', currentHost: null,
+      settings: { ...DEFAULTS, bodyFont: { source: 'weburl', name: '', url: '', urlType: 'css' } } });
+    const webUrl = root.querySelector('#webUrl');
+    webUrl.value = 'https://fonts.googleapis.com/css2?family=Nanum+Gothic';
+    webUrl.dispatchEvent(new Event('input'));
+    expect(root.querySelector('#webFamily').value).toBe('Nanum Gothic');
+    expect(api.state.webFamily).toBe('Nanum Gothic');
   });
 });
 
