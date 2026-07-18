@@ -180,6 +180,20 @@ export function extractFontFaces(cssText) {
   return out.join('\n');
 }
 
+// Decode CSS escape sequences in a url() argument (shared by the quoted and
+// unquoted branches). Per CSS syntax: `\` + 1–6 hex digits is a codepoint (one
+// trailing whitespace is consumed); `\` + newline is a line continuation (removed);
+// `\` + any other char is that char literally. Without this, a backslash reaches
+// new URL() and is treated as a path separator, corrupting the address.
+function decodeCssEscapes(s) {
+  return String(s).replace(/\\(?:([0-9a-fA-F]{1,6})[ \t\n]?|(\r\n|[\n\r\f])|([\s\S]))/g,
+    (m, hex, nl, ch) => {
+      if (hex) { const cp = parseInt(hex, 16); try { return cp ? String.fromCodePoint(cp) : '�'; } catch { return '�'; } }
+      if (nl != null) return ''; // escaped newline = line continuation
+      return ch; // escaped character = the literal character
+    });
+}
+
 // Emit a url() token for an already-resolved absolute address, preserving the
 // input quote style. An unquoted input is re-quoted only if the address contains a
 // char that can't sit bare in url() (whitespace, parens, quotes, backslash).
@@ -228,14 +242,17 @@ export function absolutizeFontUrls(cssText, baseUrl) {
       if (src[j] === '"' || src[j] === "'") {
         quote = src[j];
         const end = skipCssString(src, j);
-        ref = src.slice(j + 1, end - 1);
+        ref = decodeCssEscapes(src.slice(j + 1, end - 1));
         j = end;
       } else {
+        // Collect the raw argument (keeping backslash pairs so an escaped `)` does
+        // not terminate it), then decode CSS escapes the same way as the quoted arm.
+        let raw = '';
         while (j < n && src[j] !== ')') {
-          if (src[j] === '\\') { ref += src[j + 1] || ''; j += 2; continue; } // unescape
-          ref += src[j]; j += 1;
+          if (src[j] === '\\') { raw += src[j] + (src[j + 1] || ''); j += 2; continue; }
+          raw += src[j]; j += 1;
         }
-        ref = ref.trim();
+        ref = decodeCssEscapes(raw.trim());
       }
       while (j < n && /\s/.test(src[j])) j += 1;
       if (src[j] === ')') {

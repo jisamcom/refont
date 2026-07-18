@@ -87,6 +87,16 @@ describe('absolutizeFontUrls', () => {
     expect(out).toContain('https://cdn.test/font/v(2).woff2'); // correct absolute address
     expect(out).not.toContain('../font');
   });
+  it('decodes CSS escapes inside a QUOTED url (escaped char and hex)', () => {
+    // Escaped parens in a quoted url must be decoded, not passed to new URL() as
+    // backslashes (which the URL parser would treat as path separators).
+    const paren = absolutizeFontUrls('src:url("../font/v\\(2\\).woff2")', base);
+    expect(paren).toContain('url("https://cdn.test/font/v(2).woff2")');
+    expect(paren).not.toContain('\\'); // no stray backslash reached the address
+    // A hex escape (\20 = space, with a consumed trailing space) → %20 in the URL.
+    const hex = absolutizeFontUrls('src:url("../font/My\\20 Font.woff2")', base);
+    expect(hex).toContain('url("https://cdn.test/font/My%20Font.woff2")');
+  });
   it('does not touch a url() inside a comment or a non-url ident', () => {
     expect(absolutizeFontUrls('/* url(../x.woff2) */ a', base)).toBe('/* url(../x.woff2) */ a');
     expect(absolutizeFontUrls('myurl(../x.woff2)', base)).toBe('myurl(../x.woff2)');
