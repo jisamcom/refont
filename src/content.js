@@ -8,7 +8,7 @@ import {
 } from './lib/engine.js';
 import { shouldProtect, hasIconClassHint, isProtectedFamily } from './lib/font-protection.js';
 import { directText, isCodeElement, dedupeRoots } from './lib/dom-utils.js';
-import { dedupeClassify, firstFamilyToken } from './lib/page-fonts.js';
+import { dedupeClassify, firstFamilyToken, rememberFamily } from './lib/page-fonts.js';
 import { getSettings } from './lib/storage.js';
 import { needsFullRescan } from './lib/apply-plan.js';
 
@@ -119,10 +119,7 @@ function classifyElement(el) {
   const cs = getComputedStyle(el);
   const fontFamily = cs.fontFamily;
   const firstFamily = firstFamilyToken(fontFamily);
-  if (firstFamily && pageFontFamilies.size < MAX_PAGE_FONT_FAMILIES) {
-    const key = firstFamily.toLowerCase();
-    if (!pageFontFamilies.has(key)) pageFontFamilies.set(key, fontFamily);
-  }
+  if (firstFamily) rememberFamily(pageFontFamilies, firstFamily.toLowerCase(), fontFamily, MAX_PAGE_FONT_FAMILIES);
   const className = el.getAttribute('class') || '';
   const pseudoFontFamily = hasIconClassHint(className)
     ? `${pseudoFamily(el, '::before')} ${pseudoFamily(el, '::after')}`

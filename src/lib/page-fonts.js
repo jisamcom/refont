@@ -2,6 +2,18 @@
 // Pure helpers for building the "fonts in use on this page" list.
 import { sanitizeFamilyName } from './engine.js';
 
+// Record a page font in a recency-ordered Map with a hard cap (LRU eviction).
+// The read pass captures each element's ORIGINAL family (before Refont overrides
+// it), and in a long-lived SPA that set only ever grew — so once it hit the cap,
+// newly-seen fonts were silently dropped. LRU keeps the most-recently-seen fonts
+// instead: re-seeing a family refreshes its recency, and the oldest is evicted
+// past the cap. Bounds memory and prevents new-font starvation.
+export function rememberFamily(map, key, value, cap) {
+  if (map.has(key)) map.delete(key); // re-insert to move to the most-recent end
+  map.set(key, value);
+  while (map.size > cap) map.delete(map.keys().next().value); // evict least-recent
+}
+
 // '"Font Awesome 6 Free", sans-serif' -> 'Font Awesome 6 Free'
 export function firstFamilyToken(fontFamily) {
   const first = String(fontFamily || '').split(',')[0] || '';
