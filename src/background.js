@@ -165,7 +165,12 @@ export function registerCssOwner(tabId, frameId, docId) {
   cssStateFor(cssKey(tabId, frameId)).owner = docId;
 }
 
-export function replaceCssSerialized(tabId, frameId, css, docId, scripting = (browser && browser.scripting)) {
+// `prevCss` is the sheet the CONTENT script believes it last installed. The
+// content script survives an MV3 worker restart while this in-memory state does
+// not, so after a restart `installed` is '' and a shape change would insert the
+// new sheet without removing the old one (its now-off rules would keep applying).
+// Treating the caller's `prev` as an extra removal candidate closes that gap.
+export function replaceCssSerialized(tabId, frameId, css, docId, scripting = (browser && browser.scripting), prevCss = '') {
   const key = cssKey(tabId, frameId);
   const target = cssTarget(tabId, frameId);
   const st = cssStateFor(key);
@@ -187,7 +192,7 @@ export function replaceCssSerialized(tabId, frameId, css, docId, scripting = (br
     // global, so a failed preview insert made the next revert re-insert the still-
     // installed committed sheet (a duplicate).
     const needsInsert = css !== '' && !(sameDoc && css === st.installed);
-    const needsCleanup = st.stale.size > 0 || (st.installed && st.installed !== css) || (css === '' && !!st.installed);
+    const needsCleanup = st.stale.size > 0 || (st.installed && st.installed !== css) || (css === '' && !!st.installed) || (!!prevCss && prevCss !== css);
     if (!needsInsert && !needsCleanup) return;
     if (!scripting) { if (needsInsert || css === '') { st.installed = css; st.installedDoc = docId; } return; }
     let inserted = false;
@@ -204,6 +209,7 @@ export function replaceCssSerialized(tabId, frameId, css, docId, scripting = (br
     // the ownership recheck below.
     const toRemove = new Set(st.stale);
     if (st.installed && st.installed !== css) toRemove.add(st.installed);
+    if (prevCss && prevCss !== css) toRemove.add(prevCss); // content-supplied: survives a worker restart that lost `installed`
     st.stale.clear();
     for (const old of toRemove) {
       if (old === css) continue;
@@ -281,7 +287,7 @@ if (browser && browser.runtime && browser.runtime.onMessage) {
         registerCssOwner(tabId, frameId, msg.docId || (sender && sender.documentId));
         return undefined;
       case MSG.REPLACE_CSS:
-        return replaceCssSerialized(tabId, frameId, msg.css || '', msg.docId || (sender && sender.documentId));
+        return replaceCssSerialized(tabId, frameId, msg.css || '', msg.docId || (sender && sender.documentId), undefined, msg.prev || '');
       case MSG.TOGGLE_SITE:
         return toggleSite(msg.url || (sender.tab && sender.tab.url)).then(async (s) => { await broadcastReapply(); return s; });
       default:

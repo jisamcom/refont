@@ -164,6 +164,32 @@ describe('replaceCssSerialized', () => {
     expect(removed.filter((c) => c === 'A')).toHaveLength(2); // A removal retried
   });
 
+  it('removes a stale sheet the content script reports as prev after a worker restart', async () => {
+    // MV3 terminates the worker; the in-memory cssState is lost but the content
+    // script's appliedCss survives. On the next shape change it reports the old
+    // sheet as `prev`, and the background (fresh, installed='') must remove it so
+    // the now-off rules don't keep applying.
+    const removed = [];
+    const scripting = {
+      insertCSS: vi.fn(() => Promise.resolve()),
+      removeCSS: vi.fn(({ css }) => { removed.push(css); return Promise.resolve(); }),
+    };
+    // Fresh key (simulates a restarted worker): install B, content reports prev=A.
+    await replaceCssSerialized(40, 0, 'B', 'doc', scripting, 'A');
+    expect(scripting.insertCSS).toHaveBeenCalledWith(expect.objectContaining({ css: 'B' }));
+    expect(removed).toContain('A');                 // old sheet cleaned up via content-supplied prev
+  });
+
+  it('does not double-remove when prev equals the css being installed', async () => {
+    const removed = [];
+    const scripting = {
+      insertCSS: vi.fn(() => Promise.resolve()),
+      removeCSS: vi.fn(({ css }) => { removed.push(css); return Promise.resolve(); }),
+    };
+    await replaceCssSerialized(41, 0, 'S', 'doc', scripting, 'S'); // prev === css
+    expect(removed).toEqual([]);                     // nothing to clean; S is what we just installed
+  });
+
   it('drops the per-frame entry once torn down, and purges a closed tab', async () => {
     const scripting = okScripting();
     const before = __cssStateSize();

@@ -443,12 +443,14 @@ function removeStaticStyle() {
 // Swap the async USER-origin reinforcement sheet. The background serializes the
 // insert/remove per frame (keyed by our document token), inserting the new sheet
 // before removing what it last installed — so a preview and a committed reapply
-// can't race and leave the stale one installed. `prev` is only a local guard to
-// skip a no-op send; the background tracks the authoritative installed css itself.
+// can't race and leave the stale one installed. `prev` skips a no-op send AND is
+// forwarded so the background can remove it: this content script outlives an MV3
+// worker restart that wipes the background's authoritative `installed`, so on a
+// shape change our `prev` is the only record of the old sheet still on the page.
 // The in-page <style> (injectStaticStyle) is the synchronous, always-current half.
 function replaceCss(css, prev) {
   if (css === prev) return;
-  browser.runtime.sendMessage({ type: MSG.REPLACE_CSS, css, docId: CSS_DOC_ID }).catch(() => {});
+  browser.runtime.sendMessage({ type: MSG.REPLACE_CSS, css, prev, docId: CSS_DOC_ID }).catch(() => {});
 }
 
 // The rule half of the sheet (shape depends on which features are on, not their
