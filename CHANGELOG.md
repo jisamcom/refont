@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.3.0 — 2026-07-18
+
+### ✨ Features
+- **ui:** localize settings UI (ko/en) with in-app language selector
+- **settings:** add language field (auto/ko/en), default auto
+- **i18n:** add ko/en string dictionary with resolveLocale + createT
+
+### 🐛 Fixes
+- **scope:** normalize and range-check the port in a rule
+- **webfont:** strip CSS comments inside an unquoted url() argument too
+- **scope:** default-port toggle keys + query/hash-safe authority split
+- **webfont:** handle CR/FF hex terminators and comments around url()
+- **scope:** match rules against the target's effective (default-filled) port
+- **webfont:** decode CSS escapes in quoted url() too, not just unquoted
+- **scope:** compare toggle rules canonically and keep sibling exceptions
+- **webfont:** match @font-face with a comment or long gap before the brace
+- **a11y:** keep a single aria-selected row when the choice is also in 최근
+- **webfont:** parse url() with a CSS-aware scanner, not a regex
+- **scope:** make the site toggle flip path/port-scoped pages correctly
+- **settings:** persist both source families so the inactive one survives
+- **page-fonts:** list currently-used fonts via a bounded live scan
+- **a11y:** complete the font-picker combobox semantics
+- **scope:** resolve block vs allow by specificity (longest match wins)
+- **popup:** make the site toggle inert when Refont is globally off
+- **webfont:** absolutize relative urls, stream-cap, comment-aware @font-face
+- **popup:** tolerate a rejected site-toggle send (no unhandled rejection)
+- **a11y:** make toggles, checkboxes, and the font picker keyboard-operable
+- **popup:** reflect global-off state in the site toggle
+- **page-fonts:** bound the page-font cache with LRU eviction
+- **badge:** refresh the toolbar badge on save / site toggle / global switch
+- **observer:** reclassify an element when its only text node is removed
+- **popup:** request page fonts from the top frame only (frameId 0)
+- **security:** inject only @font-face from a webfont CSS link, not @import
+- **ui:** separate system and web font families
+- **scope:** allowlist override so parent/path-blocked sites can be re-enabled
+- **css:** remove the pre-restart USER sheet via a content-supplied prev
+- **ui:** keep chosen language when resetting settings to defaults
+- **ui:** hide language selector in popup and wire language option labels
+- protect editing surfaces and harden USER-sheet lifecycle
+
+### ⚡ Performance
+- compile per-element protection and manual-exclusion matchers
+
+### ♻️ Refactor
+- **i18n:** freeze dictionary, match primary subtag, harden tests
+
+### 📝 Docs
+- add English README, privacy policy, and store listing
+- implementation plan for ko/en i18n (UI + docs)
+- design spec for Korean/English i18n (UI + docs)
+
 ## v0.2.5 — 2026-07-11
 
 ### 🐛 Fixes

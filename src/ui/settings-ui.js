@@ -103,7 +103,7 @@ const MARKUP = `<div class="popup" id="popup">
     <!-- ===== sticky top ===== -->
     <div class="top">
       <div class="brandrow">
-        <div class="brand"><span class="mark">Refont<span class="dot">.</span></span><span class="ver">v0.2.5</span></div>
+        <div class="brand"><span class="mark">Refont<span class="dot">.</span></span><span class="ver">v0.3.0</span></div>
         <div class="toggle on" id="toggle" role="switch" aria-checked="true" tabindex="0">
           <span class="lbl" id="toggleLbl" data-i18n="toggle.on">이 사이트 켜짐</span>
           <span class="switch"></span>
