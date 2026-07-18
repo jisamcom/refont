@@ -15,7 +15,7 @@ describe('resolveLocale', () => {
   it('treats unknown/missing settings as auto and missing navLang as en', () => {
     expect(resolveLocale(undefined, 'ko-KR')).toBe('ko');
     expect(resolveLocale('auto', '')).toBe('en');
-    expect(resolveLocale('auto', undefined)).toBe('en');
+    expect(resolveLocale('auto', 'de-DE')).toBe('en');
   });
 });
 
@@ -31,6 +31,7 @@ describe('createT', () => {
   it('interpolates {n}-style placeholders', () => {
     expect(createT('en')('loadLocal.added', { n: 3 })).toBe('✓ 3 added');
     expect(createT('ko')('loadLocal.added', { n: 3 })).toBe('✓ 3개 추가됨');
+    expect(createT('en')('loadLocal.added', {})).toBe('✓ {n} added');
   });
 });
 

@@ -142,11 +142,16 @@ export const messages = {
   },
 };
 
+Object.freeze(messages.ko);
+Object.freeze(messages.en);
+Object.freeze(messages);
+Object.freeze(LOCALES);
+
 // 'auto' (or anything not a known locale) resolves from the browser language:
-// Korean when it starts with 'ko', English otherwise.
+// Korean when the primary language subtag is 'ko', English otherwise.
 export function resolveLocale(setting, navLang = (typeof navigator !== 'undefined' ? navigator.language : '')) {
   if (setting === 'ko' || setting === 'en') return setting;
-  return String(navLang || '').toLowerCase().startsWith('ko') ? 'ko' : 'en';
+  return String(navLang || '').toLowerCase().split('-')[0] === 'ko' ? 'ko' : 'en';
 }
 
 // Build a translator for a resolved locale. Missing key -> ko -> the key itself
