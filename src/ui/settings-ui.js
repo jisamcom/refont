@@ -824,23 +824,30 @@ export function mountSettingsUI(root, ctx) {
         : (siteOn ? t('toggle.on') : t('toggle.off'));
     };
     renderToggle();
-    toggle.addEventListener('click', () => {
-      siteOn = !siteOn;
-      // Mirror the background's authoritative list math locally (so a later Save
-      // stays consistent): this may add an allow-exception rather than an exact
-      // block when a broader rule covers the site.
-      const url = ctx.currentUrl || host;
-      const next = computeSiteToggle(url, siteOn, state.blocklist, state.allowlist);
-      state.blocklist = next.blocklist;
-      state.allowlist = next.allowlist;
-      const blEl = $('blocklist'); if (blEl) blEl.value = state.blocklist.join('\n');
-      const alEl = $('allowlist'); if (alEl) alEl.value = state.allowlist.join('\n');
-      renderToggle();
-      // Fire-and-forget, but never let a rejected send() surface as an unhandled
-      // rejection (the popup has no error UI for a background toggle; the list math
-      // above already reflects the desired state and a later Save re-sends it).
-      Promise.resolve(send({ type: MSG.TOGGLE_SITE, url, enable: siteOn })).catch(() => {});
-    });
+    if (globalOn()) {
+      toggle.addEventListener('click', () => {
+        siteOn = !siteOn;
+        // Mirror the background's authoritative list math locally (so a later Save
+        // stays consistent): this may add an allow-exception rather than an exact
+        // block when a broader rule covers the site.
+        const url = ctx.currentUrl || host;
+        const next = computeSiteToggle(url, siteOn, state.blocklist, state.allowlist);
+        state.blocklist = next.blocklist;
+        state.allowlist = next.allowlist;
+        const blEl = $('blocklist'); if (blEl) blEl.value = state.blocklist.join('\n');
+        const alEl = $('allowlist'); if (alEl) alEl.value = state.allowlist.join('\n');
+        renderToggle();
+        // Fire-and-forget, but never let a rejected send() surface as an unhandled
+        // rejection (the popup has no error UI for a background toggle; the list math
+        // above already reflects the desired state and a later Save re-sends it).
+        Promise.resolve(send({ type: MSG.TOGGLE_SITE, url, enable: siteOn })).catch(() => {});
+      });
+    } else {
+      // Refont is globally off: the per-site switch can't take effect, so make it
+      // inert (aria-disabled, no click/keyboard handler) instead of silently
+      // rewriting the block/allow lists behind an unchanged-looking switch.
+      toggle.setAttribute('aria-disabled', 'true');
+    }
   } else {
     let on = state.enabled !== false;
     setToggle(on);

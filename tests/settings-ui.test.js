@@ -317,6 +317,20 @@ describe('scope + protection', () => {
     expect(root.querySelector('#toggleLbl').textContent).toBe('전체 꺼짐'); // labelled global-off, not "on for this site"
   });
 
+  it('does not mutate the block/allow lists when the site toggle is clicked while globally off', () => {
+    const root = document.createElement('div');
+    const sent = [];
+    const api = mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', currentUrl: 'https://x.com/', tabId: 1,
+      blocked: false, settings: { ...DEFAULTS, enabled: false }, send: (m) => { sent.push(m); return Promise.resolve({}); } });
+    const toggle = root.querySelector('#toggle');
+    expect(toggle.getAttribute('aria-disabled')).toBe('true');
+    toggle.click();
+    toggle.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+    expect(api.state.blocklist).toEqual([]);   // no silent block added
+    expect(api.state.allowlist).toEqual([]);
+    expect(sent).toEqual([]);                   // nothing sent to the background
+  });
+
   it('round-trips the allowlist through the options editor', () => {
     const root = document.createElement('div');
     const api = mountSettingsUI(root, { context: 'options', currentHost: null,
