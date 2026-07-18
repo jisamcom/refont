@@ -38,6 +38,12 @@ describe('computeSiteToggle', () => {
     flips('http://example.com:3000/', true, ['example.com:3000'], []);      // ON despite :3000 block
     flips('http://example.com:3000/', false, [], ['example.com:3000', 'example.com']); // OFF despite :3000 allow
   });
+  it('flips a page governed by a DEFAULT-port rule (:443 / :80) — postcondition', () => {
+    flips('https://example.com/', true, ['example.com:443'], []);       // ON despite :443 block
+    flips('https://example.com/', false, [], ['example.com:443']);      // OFF despite :443 allow
+    flips('http://example.com/', true, ['example.com:80'], []);         // ON despite :80 block
+    flips('https://example.com/admin', true, ['example.com:443/admin'], []); // ON despite :443/path block
+  });
   it('flips regardless of how the existing rule is spelled (case/full-URL/trailing slash)', () => {
     flips('https://example.com/Admin', false, [], ['example.com/admin']);        // uppercase path
     flips('https://example.com/admin', false, [], ['https://example.com/admin']); // pasted full URL
@@ -84,6 +90,13 @@ describe('isBlocked specificity (longest match wins)', () => {
     // a pasted https://…:443 keeps its port constraint (does not become all-ports).
     expect(isBlocked('http://example.com/', ['https://example.com:443'])).toBe(false);
     expect(isBlocked('https://example.com/', ['https://example.com:443'])).toBe(true);
+  });
+  it('keeps the port constraint when a pasted rule has a query/hash but no path', () => {
+    // ':443?x=1' must not fold the query into the authority and lose the port.
+    expect(isBlocked('https://example.com/', ['https://example.com:443?x=1'])).toBe(true);
+    expect(isBlocked('http://example.com/', ['https://example.com:443?x=1'])).toBe(false);
+    expect(isBlocked('https://example.com:8443/', ['https://example.com:8443#section'])).toBe(true);
+    expect(isBlocked('https://example.com/', ['https://example.com:8443#section'])).toBe(false);
   });
   it('ranks an explicit port rule above an all-ports rule', () => {
     // :3000 block is more specific than an all-ports allow → blocked.

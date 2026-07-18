@@ -16,9 +16,17 @@ function parseEntry(raw) {
   if (!value) return null;
   const scheme = value.match(/^[a-z][a-z0-9+.-]*:\/\//i);
   const rest = scheme ? value.slice(scheme[0].length) : value;
-  const slash = rest.indexOf('/');
-  const authority = (slash >= 0 ? rest.slice(0, slash) : rest).replace(/^\*\./, '');
-  const path = slash >= 0 ? rest.slice(slash).replace(/\/+$/, '') : '';
+  // The authority ends at the FIRST of / ? # — so a pasted URL whose port is
+  // followed directly by a query/hash (example.com:443?x=1) doesn't fold the
+  // query into the authority and lose the port.
+  const cut = rest.search(/[/?#]/);
+  const authority = (cut >= 0 ? rest.slice(0, cut) : rest).replace(/^\*\./, '');
+  let path = '';
+  if (cut >= 0 && rest[cut] === '/') {
+    const pathPart = rest.slice(cut);
+    const qh = pathPart.search(/[?#]/);
+    path = (qh >= 0 ? pathPart.slice(0, qh) : pathPart).replace(/\/+$/, '');
+  }
   const portMatch = authority.match(/:(\d{1,5})$/);
   const port = portMatch ? portMatch[1] : '';
   const hostRaw = portMatch ? authority.slice(0, authority.length - portMatch[0].length) : authority;
@@ -151,12 +159,19 @@ export function computeSiteToggle(url, enable, blocklist = [], allowlist = []) {
   const al = Array.isArray(allowlist) ? allowlist.slice() : [];
   let u;
   try { u = new URL(url); } catch { return { blocklist: bl, allowlist: al }; }
-  const hostPart = u.hostname.toLowerCase() + (u.port ? `:${u.port}` : '');
+  const hostname = u.hostname.toLowerCase();
+  const eport = effectivePort(u); // default-filled, so :443/:80 rules are addressable
+  const portHost = `${hostname}:${eport}`;
   const pathLower = u.pathname.toLowerCase().replace(/\/+$/, '');
-  const hostKey = hostPart;
-  const pathKey = pathLower ? `${hostPart}${pathLower}` : hostPart;
-  // The entries we own for this page, canonical, least → most specific.
-  const keys = pathKey === hostKey ? [hostKey] : [hostKey, pathKey];
+  // The entries that canonically identify this page, ordered least → most specific
+  // (host < host/path < host:port < host:port/path). Both the portless and the
+  // port-qualified forms are candidates, so a rule written either way (or a page on
+  // a default port, where matching uses the effective port) can be removed or beaten.
+  const keys = [hostname];
+  if (pathLower) keys.push(`${hostname}${pathLower}`);
+  keys.push(portHost);
+  if (pathLower) keys.push(`${portHost}${pathLower}`);
+  const pathKey = keys[keys.length - 1]; // most specific — the guaranteed-winning fallback
   // Remove ONLY the entries that canonicalize to one of our page keys (compared
   // canonically, so casing/format differences still match). A user's broader
   // parent/prefix rules are left intact so sibling paths keep their state.
