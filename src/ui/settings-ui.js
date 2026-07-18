@@ -802,23 +802,30 @@ export function mountSettingsUI(root, ctx) {
   }
   if (ctx.context === 'popup') {
     const host = ctx.currentHost || '';
-    let on = !ctx.blocked;
-    setToggle(on);
-    toggleLbl.textContent = on ? t('toggle.on') : t('toggle.off');
+    let siteOn = !ctx.blocked;
+    const globalOn = () => state.enabled !== false;
+    // The displayed on/off is the EFFECTIVE state (global AND site). When Refont
+    // is globally off, the site toggle would otherwise lie ("on for this site"),
+    // so the label says so explicitly and the switch reads off.
+    const renderToggle = () => {
+      setToggle(globalOn() && siteOn);
+      toggleLbl.textContent = !globalOn() ? t('toggle.offAll')
+        : (siteOn ? t('toggle.on') : t('toggle.off'));
+    };
+    renderToggle();
     toggle.addEventListener('click', () => {
-      on = !on;
-      setToggle(on);
-      toggleLbl.textContent = on ? t('toggle.on') : t('toggle.off');
+      siteOn = !siteOn;
       // Mirror the background's authoritative list math locally (so a later Save
       // stays consistent): this may add an allow-exception rather than an exact
       // block when a broader rule covers the site.
       const url = ctx.currentUrl || host;
-      const next = computeSiteToggle(url, on, state.blocklist, state.allowlist);
+      const next = computeSiteToggle(url, siteOn, state.blocklist, state.allowlist);
       state.blocklist = next.blocklist;
       state.allowlist = next.allowlist;
       const blEl = $('blocklist'); if (blEl) blEl.value = state.blocklist.join('\n');
       const alEl = $('allowlist'); if (alEl) alEl.value = state.allowlist.join('\n');
-      send({ type: MSG.TOGGLE_SITE, url, enable: on });
+      renderToggle();
+      send({ type: MSG.TOGGLE_SITE, url, enable: siteOn });
     });
   } else {
     let on = state.enabled !== false;

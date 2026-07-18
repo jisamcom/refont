@@ -269,6 +269,15 @@ describe('scope + protection', () => {
     expect(root.querySelector('#allowlist').value).toBe('sub.example.com'); // exception added...
     expect(root.querySelector('#blocklist').value).toBe('example.com');     // ...parent rule untouched
   });
+  it('popup toggle shows the global-off state instead of claiming the site is on', () => {
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', currentUrl: 'https://x.com/', tabId: 1,
+      blocked: false, settings: { ...DEFAULTS, enabled: false } });
+    const toggle = root.querySelector('#toggle');
+    expect(toggle.classList.contains('on')).toBe(false);          // effective off (global off)
+    expect(root.querySelector('#toggleLbl').textContent).toBe('전체 꺼짐'); // labelled global-off, not "on for this site"
+  });
+
   it('round-trips the allowlist through the options editor', () => {
     const root = document.createElement('div');
     const api = mountSettingsUI(root, { context: 'options', currentHost: null,
