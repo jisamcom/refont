@@ -7,6 +7,7 @@ import { parseAxes, splitTextAxes } from '../lib/engine.js';
 import { localFontsSupported, queryInstalledFamilies } from '../lib/local-fonts.js';
 import { labelOf, toOptions } from './font-names.js';
 import { makeFontPicker } from './font-picker.js';
+import { resolveLocale, createT } from '../lib/i18n.js';
 
 // ---- pure mapping (unit-tested) ----
 export function settingsToState(s) {
@@ -63,7 +64,7 @@ const MARKUP = `<div class="popup" id="popup">
       <div class="brandrow">
         <div class="brand"><span class="mark">Refont<span class="dot">.</span></span><span class="ver">v0.2.5</span></div>
         <div class="toggle on" id="toggle" role="switch" aria-checked="true" tabindex="0">
-          <span class="lbl" id="toggleLbl">이 사이트 켜짐</span>
+          <span class="lbl" id="toggleLbl" data-i18n="toggle.on">이 사이트 켜짐</span>
           <span class="switch"></span>
         </div>
       </div>
@@ -84,27 +85,27 @@ const MARKUP = `<div class="popup" id="popup">
       <section>
         <div class="sec-h"><span class="t">Typeface</span><span class="rule"></span></div>
         <div class="seg" id="srcSeg" role="tablist">
-          <button role="tab" aria-selected="true" data-src="system">시스템 폰트</button>
-          <button role="tab" aria-selected="false" data-src="weburl">웹폰트 URL</button>
+          <button role="tab" aria-selected="true" data-src="system" data-i18n="src.system">시스템 폰트</button>
+          <button role="tab" aria-selected="false" data-src="weburl" data-i18n="src.weburl">웹폰트 URL</button>
         </div>
 
         <div id="srcSystem">
-          <label class="field">폰트 · 검색하거나 직접 입력</label>
+          <label class="field" data-i18n="src.fontLabel">폰트 · 검색하거나 직접 입력</label>
           <div class="fp" id="bodyPicker"></div>
-          <button class="btn-add" id="loadLocal" type="button" hidden style="margin-top:8px">설치된 폰트 정확히 불러오기</button>
+          <button class="btn-add" id="loadLocal" type="button" hidden style="margin-top:8px" data-i18n="src.loadLocal">설치된 폰트 정확히 불러오기</button>
         </div>
 
         <div id="srcWeb" hidden>
           <div class="seg" id="webTypeSeg" style="margin-top:8px">
-            <button aria-selected="true" data-wt="css">CSS / 구글폰트 링크</button>
-            <button aria-selected="false" data-wt="file">폰트 파일(.woff2)</button>
+            <button aria-selected="true" data-wt="css" data-i18n="web.css">CSS / 구글폰트 링크</button>
+            <button aria-selected="false" data-wt="file" data-i18n="web.file">폰트 파일(.woff2)</button>
           </div>
           <label class="field">URL</label>
           <input type="url" id="webUrl" placeholder="https://fonts.googleapis.com/css2?family=…" />
           <div id="webFamilyWrap" hidden>
-            <label class="field">패밀리명 (파일 URL일 때 필수)</label>
-            <input type="text" id="webFamily" placeholder="예: Pretendard" />
-            <span class="check" id="ckOptional" role="checkbox" aria-checked="false" tabindex="0" style="margin-top:9px"><span class="box"></span>레이아웃 시프트 최소화 (font-display: optional)</span>
+            <label class="field" data-i18n="web.familyLabel">패밀리명 (파일 URL일 때 필수)</label>
+            <input type="text" id="webFamily" placeholder="예: Pretendard" data-i18n-placeholder="web.familyPlaceholder" />
+            <span class="check" id="ckOptional" role="checkbox" aria-checked="false" tabindex="0" style="margin-top:9px"><span class="box"></span><span data-i18n="web.optional">레이아웃 시프트 최소화 (font-display: optional)</span></span>
           </div>
         </div>
       </section>
@@ -112,26 +113,26 @@ const MARKUP = `<div class="popup" id="popup">
       <!-- SIZE & RHYTHM -->
       <section>
         <div class="sec-h"><span class="t">Size &amp; rhythm</span><span class="rule"></span></div>
-        <div class="minirow"><button class="btn-add" id="presetA11y" type="button">읽기 좋게 (접근성)</button><span class="hint" style="font-size:11px;color:var(--ink-dim)">최소 크기·줄간격·자간을 한 번에 (한글 포함)</span></div>
+        <div class="minirow"><button class="btn-add" id="presetA11y" type="button" data-i18n="size.presetA11y">읽기 좋게 (접근성)</button><span class="hint" style="font-size:11px;color:var(--ink-dim)" data-i18n="size.presetHint">최소 크기·줄간격·자간을 한 번에 (한글 포함)</span></div>
 
         <div class="ctl">
-          <div class="row"><span class="name">크기 배율</span><span class="val" id="vScale">1.10×</span></div>
+          <div class="row"><span class="name" data-i18n="metric.scale">크기 배율</span><span class="val" id="vScale">1.10×</span></div>
           <input type="range" id="rScale" min="0.5" max="2.5" step="0.05" value="1.1" />
         </div>
         <div class="ctl">
-          <div class="row"><span class="name">최소 크기</span><span class="val off" id="vMin">끔</span></div>
+          <div class="row"><span class="name" data-i18n="metric.min">최소 크기</span><span class="val off" id="vMin" data-i18n="metric.off">끔</span></div>
           <input type="range" id="rMin" min="0" max="24" step="1" value="0" />
         </div>
         <div class="ctl">
-          <div class="row"><span class="name">줄간격</span><span class="val off" id="vLh">끔</span></div>
+          <div class="row"><span class="name" data-i18n="metric.lineHeight">줄간격</span><span class="val off" id="vLh" data-i18n="metric.off">끔</span></div>
           <input type="range" id="rLh" min="0" max="2.6" step="0.05" value="0" />
         </div>
         <div class="ctl">
-          <div class="row"><span class="name">자간</span><span class="val" id="vLs">0.00em</span></div>
+          <div class="row"><span class="name" data-i18n="metric.letterSpacing">자간</span><span class="val" id="vLs">0.00em</span></div>
           <input type="range" id="rLs" min="-0.05" max="0.3" step="0.01" value="0" />
         </div>
         <div class="ctl">
-          <div class="row"><span class="name">어절 간격</span><span class="val off" id="vWs">끔</span></div>
+          <div class="row"><span class="name" data-i18n="metric.wordSpacing">어절 간격</span><span class="val off" id="vWs" data-i18n="metric.off">끔</span></div>
           <input type="range" id="rWs" min="0" max="0.5" step="0.02" value="0" />
         </div>
       </section>
@@ -140,30 +141,30 @@ const MARKUP = `<div class="popup" id="popup">
       <section>
         <div class="sec-h"><span class="t">Weight &amp; width</span><span class="rule"></span></div>
         <div class="ctl">
-          <div class="row"><span class="name">두께</span><span class="val" id="vWeight">700</span></div>
+          <div class="row"><span class="name" data-i18n="metric.weight">두께</span><span class="val" id="vWeight">700</span></div>
           <input type="range" id="rWeight" min="100" max="900" step="100" value="700" />
           <div class="ticks" id="ticks"></div>
         </div>
         <div class="ctl">
-          <div class="row"><span class="name">너비</span><span class="val off" id="vWidth">원본</span></div>
+          <div class="row"><span class="name" data-i18n="metric.width">너비</span><span class="val off" id="vWidth" data-i18n="metric.original">원본</span></div>
           <input type="range" id="rWidth" min="50" max="200" step="5" value="100" />
         </div>
         <div class="minirow">
-          <span class="check on" id="ckPreserve" role="checkbox" aria-checked="true" tabindex="0"><span class="box"></span>볼드 위계 보존</span>
-          <span class="check" id="ckFine" role="checkbox" aria-checked="false" tabindex="0"><span class="box"></span>미세조정 (variable)</span>
-          <span class="check on" id="ckOptical" role="checkbox" aria-checked="true" tabindex="0"><span class="box"></span>광학 크기 자동</span>
+          <span class="check on" id="ckPreserve" role="checkbox" aria-checked="true" tabindex="0"><span class="box"></span><span data-i18n="check.preserveBold">볼드 위계 보존</span></span>
+          <span class="check" id="ckFine" role="checkbox" aria-checked="false" tabindex="0"><span class="box"></span><span data-i18n="check.fine">미세조정 (variable)</span></span>
+          <span class="check on" id="ckOptical" role="checkbox" aria-checked="true" tabindex="0"><span class="box"></span><span data-i18n="check.optical">광학 크기 자동</span></span>
         </div>
         <details class="adv">
-          <summary>추가 가변 축 (variable axes)</summary>
-          <input type="text" id="axes" placeholder="예: slnt -6, ital 1, GRAD 50" style="margin-top:6px" />
-          <div class="sec-h" style="margin:8px 0 0"><span class="hint" style="font-size:11px;color:var(--ink-dim)"><code>tag value</code> 쌍을 쉼표로. 두께·너비·광학크기는 위 컨트롤로 조절하세요. 등록 축은 표준 속성으로, 커스텀 축(대문자)은 font-variation-settings로 적용됩니다.</span></div>
+          <summary data-i18n="axes.summary">추가 가변 축 (variable axes)</summary>
+          <input type="text" id="axes" placeholder="예: slnt -6, ital 1, GRAD 50" style="margin-top:6px" data-i18n-placeholder="axes.placeholder" />
+          <div class="sec-h" style="margin:8px 0 0"><span class="hint" style="font-size:11px;color:var(--ink-dim)" data-i18n="axes.hint">tag value 쌍을 쉼표로. 두께·너비·광학 크기는 위 컨트롤로 조절하세요. 등록 축은 표준 속성으로, 커스텀 축(대문자)은 font-variation-settings로 적용됩니다.</span></div>
         </details>
       </section>
 
       <!-- CODE FONT -->
       <section>
-        <div class="sec-h"><span class="t">Code font</span><span class="rule"></span><span class="hint">코드·고정폭 전용</span></div>
-        <span class="check" id="ckCode" role="checkbox" aria-checked="false" tabindex="0"><span class="box"></span>코드/고정폭에 별도 폰트 사용</span>
+        <div class="sec-h"><span class="t">Code font</span><span class="rule"></span><span class="hint" data-i18n="code.hint">코드·고정폭 전용</span></div>
+        <span class="check" id="ckCode" role="checkbox" aria-checked="false" tabindex="0"><span class="box"></span><span data-i18n="code.enable">코드/고정폭에 별도 폰트 사용</span></span>
         <div id="codeWrap" hidden>
           <div class="fp" id="codePicker" style="margin-top:9px"></div>
           <div class="codeprev" id="codePrev">
@@ -175,42 +176,49 @@ const MARKUP = `<div class="popup" id="popup">
 
       <!-- SCOPE / blocklist -->
       <section>
-        <div class="sec-h"><span class="t kr">이 사이트 제외</span><span class="rule"></span></div>
+        <div class="sec-h"><span class="t kr" data-i18n="scope.title">이 사이트 제외</span><span class="rule"></span></div>
         <div class="site">
           <span class="host" id="curHost"><span class="scheme">https://</span>news.example.com<span class="scheme">/article/2026</span></span>
-          <button class="btn-add" id="addHost">+ 추가</button>
+          <button class="btn-add" id="addHost" data-i18n="scope.addHost">+ 추가</button>
         </div>
-        <label class="field">블록리스트 (한 줄에 하나)</label>
+        <label class="field" data-i18n="scope.blocklistLabel">블록리스트 (한 줄에 하나)</label>
         <textarea id="blocklist">docs.google.com/spreadsheets</textarea>
         <details class="adv">
-          <summary>고급: 이 사이트의 특정 요소 제외 (CSS 선택자)</summary>
+          <summary data-i18n="scope.advSummary">고급: 이 사이트의 특정 요소 제외 (CSS 선택자)</summary>
           <span class="hint" id="selNote" style="display:none;font-size:11px;color:var(--ink-dim)"></span>
-          <textarea id="selExclude" placeholder="한 줄에 하나 — 예: .sidebar, code.hljs, [data-no-font]" style="margin-top:6px"></textarea>
+          <textarea id="selExclude" placeholder="한 줄에 하나 — 예: .sidebar, code.hljs, [data-no-font]" style="margin-top:6px" data-i18n-placeholder="scope.selPlaceholder"></textarea>
         </details>
       </section>
 
       <!-- PROTECTION -->
       <section>
-        <div class="sec-h"><span class="t kr">보호 폰트</span><span class="rule"></span><span class="hint">이 페이지에서 사용 중</span></div>
+        <div class="sec-h"><span class="t kr" data-i18n="protect.title">보호 폰트</span><span class="rule"></span><span class="hint" data-i18n="protect.inUse">이 페이지에서 사용 중</span></div>
         <div class="chips" id="pageFonts"></div>
         <details class="adv" open>
-          <summary>수동 보호 목록</summary>
-          <textarea id="protect" placeholder="family명 일부 — 자동 감지가 놓친 아이콘/기능성 폰트" style="margin-top:6px"></textarea>
+          <summary data-i18n="protect.summary">수동 보호 목록</summary>
+          <textarea id="protect" placeholder="family명 일부 — 자동 감지가 놓친 아이콘/기능성 폰트" style="margin-top:6px" data-i18n-placeholder="protect.placeholder"></textarea>
         </details>
       </section>
 
       <div class="footer">
-        <button class="btn-reset" id="reset">기본값으로 초기화</button>
+        <label class="lang" id="langRow"><span data-i18n="lang.label">언어</span>
+          <select id="langSel">
+            <option value="auto" data-i18n="lang.auto">자동</option>
+            <option value="ko">한국어</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+        <button class="btn-reset" id="reset" data-i18n="footer.reset">기본값으로 초기화</button>
       </div>
 
     </div>
 
     <!-- ===== sticky actions ===== -->
     <div class="actions">
-      <button class="btn primary" id="save">저장</button>
-      <button class="btn" id="export">내보내기</button>
-      <button class="btn" id="import">가져오기</button>
-      <button class="btn icon" id="full" title="전체 화면 옵션 탭으로 열기">⤢</button>
+      <button class="btn primary" id="save" data-i18n="action.save">저장</button>
+      <button class="btn" id="export" data-i18n="action.export">내보내기</button>
+      <button class="btn" id="import" data-i18n="action.import">가져오기</button>
+      <button class="btn icon" id="full" title="전체 화면 옵션 탭으로 열기" data-i18n-title="action.fullTitle">⤢</button>
     </div>
 
   </div>`;
@@ -226,11 +234,22 @@ function htmlToFragment(html) {
   return frag;
 }
 
+// Fill data-i18n text/attributes from the dictionary after the static markup is
+// mounted. Text-only elements carry data-i18n; attributes use data-i18n-<attr>.
+export function applyI18n(root, t) {
+  for (const el of root.querySelectorAll('[data-i18n]')) el.textContent = t(el.getAttribute('data-i18n'));
+  for (const el of root.querySelectorAll('[data-i18n-placeholder]')) el.setAttribute('placeholder', t(el.getAttribute('data-i18n-placeholder')));
+  for (const el of root.querySelectorAll('[data-i18n-title]')) el.setAttribute('title', t(el.getAttribute('data-i18n-title')));
+}
+
 export function mountSettingsUI(root, ctx) {
   const settings = ctx.settings || DEFAULTS;
   const state = settingsToState(settings);
   document.body.classList.add(ctx.context === 'options' ? 'ctx-options' : 'ctx-popup');
   root.replaceChildren(htmlToFragment(MARKUP));
+  const locale = resolveLocale(settings.language);
+  const t = createT(locale);
+  applyI18n(root, t);
 
   // ---- live specimen preview + sliders + weight + axes (scoped to root) ----
   const $ = (id) => root.querySelector('#' + id);
@@ -281,7 +300,7 @@ export function mountSettingsUI(root, ctx) {
       { b: true, t: String(state.weight) },
     ];
     if (state.width > 0) parts.push({ t: 'wdth ' + state.width + '%' });
-    if (state.opticalSizing === 'none') parts.push({ t: 'opsz 끔' });
+    if (state.opticalSizing === 'none') parts.push({ t: t('opsz.off') });
     if (state.minSize > 0) parts.push({ t: 'min ' + state.minSize + 'px' });
     if (state.lineHeight > 0) parts.push({ t: 'lh ' + state.lineHeight.toFixed(2) });
     if (state.letterSpacing != 0) parts.push({ t: 'ls ' + state.letterSpacing.toFixed(2) + 'em' });
@@ -312,20 +331,20 @@ export function mountSettingsUI(root, ctx) {
   const updMin = () => {
     state.minSize = +rMin.value;
     const v = $('vMin');
-    if (state.minSize === 0) { v.textContent = '끔'; v.classList.add('off'); }
+    if (state.minSize === 0) { v.textContent = t('metric.off'); v.classList.add('off'); }
     else { v.textContent = state.minSize + 'px'; v.classList.remove('off'); }
   };
   const updLh = () => {
     state.lineHeight = +rLh.value;
     const v = $('vLh');
-    if (state.lineHeight === 0) { v.textContent = '끔'; v.classList.add('off'); }
+    if (state.lineHeight === 0) { v.textContent = t('metric.off'); v.classList.add('off'); }
     else { v.textContent = state.lineHeight.toFixed(2); v.classList.remove('off'); }
   };
   const updLs = () => { state.letterSpacing = +rLs.value; $('vLs').textContent = state.letterSpacing.toFixed(2) + 'em'; };
   const updWs = () => {
     state.wordSpacing = +rWs.value;
     const v = $('vWs');
-    if (state.wordSpacing === 0) { v.textContent = '끔'; v.classList.add('off'); }
+    if (state.wordSpacing === 0) { v.textContent = t('metric.off'); v.classList.add('off'); }
     else { v.textContent = state.wordSpacing.toFixed(2) + 'em'; v.classList.remove('off'); }
   };
   const updWeight = () => { state.weight = +rWeight.value; $('vWeight').textContent = state.weight; markTicks(); };
@@ -334,7 +353,7 @@ export function mountSettingsUI(root, ctx) {
   const updWidth = () => {
     state.width = (+rWidth.value === 100) ? 0 : +rWidth.value;
     const v = $('vWidth');
-    if (state.width === 0) { v.textContent = '원본'; v.classList.add('off'); }
+    if (state.width === 0) { v.textContent = t('metric.original'); v.classList.add('off'); }
     else { v.textContent = state.width + '%'; v.classList.remove('off'); }
   };
   wire(rScale, updScale);
@@ -403,11 +422,11 @@ export function mountSettingsUI(root, ctx) {
   // weight:0 (원본/keep) → position slider at 400 but keep state.weight at 0 for saving.
   rWeight.value = state.weight || 400;
   rWeight.step = state.weightFine ? 1 : 100;
-  $('vWeight').textContent = state.weight === 0 ? '원본' : state.weight;
+  $('vWeight').textContent = state.weight === 0 ? t('metric.original') : state.weight;
   // width:0 (원본/keep) → position slider at 100% but keep state.width at 0 for saving.
   rWidth.value = state.width || 100;
   const vWidth = $('vWidth');
-  if (state.width === 0) { vWidth.textContent = '원본'; vWidth.classList.add('off'); }
+  if (state.width === 0) { vWidth.textContent = t('metric.original'); vWidth.classList.add('off'); }
   else { vWidth.textContent = state.width + '%'; vWidth.classList.remove('off'); }
   $('axes').value = state.axes;
   // Sync the size/rhythm value chips to the loaded settings (weight chip handled above).
@@ -480,9 +499,9 @@ export function mountSettingsUI(root, ctx) {
         let added = 0;
         for (const f of fams) if (!have.has(f)) { bodyFams.push(f); have.add(f); added += 1; }
         buildPickers();
-        loadLocalBtn.textContent = `✓ ${added}개 추가됨`;
+        loadLocalBtn.textContent = t('loadLocal.added', { n: added });
       } catch {
-        loadLocalBtn.textContent = '권한 거부됨';
+        loadLocalBtn.textContent = t('loadLocal.denied');
       }
       setTimeout(() => { loadLocalBtn.textContent = orig; }, 1600);
     });
@@ -568,7 +587,7 @@ export function mountSettingsUI(root, ctx) {
   const curHost = $('curHost');
   const addHost = $('addHost');
   if (ctx.context === 'options' || !host) {
-    curHost.textContent = '현재 사이트 없음 — 팝업에서 사이트별로 설정';
+    curHost.textContent = t('scope.hostNone');
     addHost.disabled = true;
   } else {
     curHost.textContent = host;
@@ -579,7 +598,7 @@ export function mountSettingsUI(root, ctx) {
       state.blocklist = lines.slice();
       scheduleLiveApply();
       const orig = addHost.textContent;
-      addHost.textContent = '✓ 추가됨';
+      addHost.textContent = t('scope.hostAdded');
       setTimeout(() => { addHost.textContent = orig; }, 1200);
     });
   }
@@ -590,7 +609,7 @@ export function mountSettingsUI(root, ctx) {
   if (ctx.context === 'options' || !host) {
     selEl.style.display = 'none';
     selNote.style.display = '';
-    selNote.textContent = '팝업에서 사이트별로 설정하세요.';
+    selNote.textContent = t('scope.selPopupNote');
   } else {
     selEl.value = (state.manualExclusions[host] || []).join('\n');
     selEl.addEventListener('input', () => {
@@ -608,8 +627,8 @@ export function mountSettingsUI(root, ctx) {
     const empty = document.createElement('div');
     empty.className = 'empty';
     empty.textContent = (ctx.context === 'options')
-      ? '팝업에서 페이지별로 확인'
-      : '이 페이지에서 감지된 폰트 없음';
+      ? t('pageFonts.popupHint')
+      : t('pageFonts.none');
     chips.appendChild(empty);
   } else {
     for (const pf of pageFonts) {
@@ -621,10 +640,10 @@ export function mountSettingsUI(root, ctx) {
       nm.textContent = pf.name;
       const tag = document.createElement('span');
       tag.className = 'tag ' + (pf.protected ? 'prot' : 'body');
-      tag.textContent = pf.protected ? '기능성' : '본문';
+      tag.textContent = pf.protected ? t('tag.functional') : t('tag.body');
       const plus = document.createElement('button');
       plus.className = 'plus';
-      plus.title = '보호 목록에 추가';
+      plus.title = t('protect.addTitle');
       plus.textContent = '+';
       plus.addEventListener('click', () => {
         const lines = protectEl.value.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -642,6 +661,21 @@ export function mountSettingsUI(root, ctx) {
   // ---- actions ----
   const send = ctx.send || ((m) => browser.runtime.sendMessage(m));
 
+  // Language: persist immediately and reload so the whole UI re-renders in the
+  // chosen locale. Shown on the options page only; the popup inherits the choice.
+  // reload is injectable (ctx.reload) so tests don't have to monkeypatch location.
+  const reloadPage = ctx.reload || (() => location.reload());
+  const langRow = $('langRow');
+  const langSel = $('langSel');
+  if (ctx.context !== 'options') { if (langRow) langRow.hidden = true; }
+  if (langSel) {
+    langSel.value = settings.language || 'auto';
+    langSel.addEventListener('change', async () => {
+      try { await send({ type: MSG.SAVE_SETTINGS, payload: { language: langSel.value } }); } catch {}
+      reloadPage();
+    });
+  }
+
   // Save
   const saveBtn = $('save');
   saveBtn.addEventListener('click', async () => {
@@ -649,10 +683,10 @@ export function mountSettingsUI(root, ctx) {
     saveBtn.disabled = true;
     try {
       await send({ type: MSG.SAVE_SETTINGS, payload: stateToSettings(state) });
-      saveBtn.textContent = '✓ 저장됨';
+      saveBtn.textContent = t('action.saved');
       saveBtn.classList.add('saved');
     } catch {
-      saveBtn.textContent = '저장 실패';
+      saveBtn.textContent = t('action.saveFail');
       saveBtn.classList.remove('saved');
     } finally {
       setTimeout(() => {
@@ -690,7 +724,7 @@ export function mountSettingsUI(root, ctx) {
       location.reload();
     } catch {
       const orig = saveBtn.textContent;
-      saveBtn.textContent = '잘못된 파일';
+      saveBtn.textContent = t('action.importInvalid');
       setTimeout(() => { saveBtn.textContent = orig; }, 1500);
     }
   });
@@ -716,11 +750,11 @@ export function mountSettingsUI(root, ctx) {
     const host = ctx.currentHost || '';
     let on = !ctx.blocked;
     setToggle(on);
-    toggleLbl.textContent = on ? '이 사이트 켜짐' : '이 사이트 꺼짐';
+    toggleLbl.textContent = on ? t('toggle.on') : t('toggle.off');
     toggle.addEventListener('click', () => {
       on = !on;
       setToggle(on);
-      toggleLbl.textContent = on ? '이 사이트 켜짐' : '이 사이트 꺼짐';
+      toggleLbl.textContent = on ? t('toggle.on') : t('toggle.off');
       // keep state.blocklist in sync (off => host present)
       const set = new Set(state.blocklist);
       if (on) set.delete(host); else if (host) set.add(host);
@@ -731,12 +765,12 @@ export function mountSettingsUI(root, ctx) {
   } else {
     let on = state.enabled !== false;
     setToggle(on);
-    toggleLbl.textContent = on ? '전체 켜짐' : '전체 꺼짐';
+    toggleLbl.textContent = on ? t('toggle.onAll') : t('toggle.offAll');
     toggle.addEventListener('click', () => {
       on = !on;
       state.enabled = on;
       setToggle(on);
-      toggleLbl.textContent = on ? '전체 켜짐' : '전체 꺼짐';
+      toggleLbl.textContent = on ? t('toggle.onAll') : t('toggle.offAll');
     });
   }
 
@@ -746,10 +780,10 @@ export function mountSettingsUI(root, ctx) {
   resetBtn.addEventListener('click', () => {
     if (!resetArmed) {
       resetArmed = true;
-      resetBtn.textContent = '한번 더 눌러 초기화';
+      resetBtn.textContent = t('footer.resetConfirm');
       resetBtn.classList.add('confirm');
       resetTimer = setTimeout(() => {
-        resetArmed = false; resetBtn.textContent = '기본값으로 초기화'; resetBtn.classList.remove('confirm');
+        resetArmed = false; resetBtn.textContent = t('footer.reset'); resetBtn.classList.remove('confirm');
       }, 3000);
       return;
     }

@@ -198,7 +198,9 @@ input[type=range]:focus-visible::-webkit-slider-thumb{background:var(--accent)}
 .fp-group{font-family:var(--ui);font-size:10.5px;font-weight:600;color:var(--ink-faint);padding:8px 10px 3px}
 
 /* footer reset */
-.footer{padding:14px 0 2px;text-align:center}
+.footer{padding:14px 0 2px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.lang{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-dim)}
+.lang select{font:inherit;padding:2px 4px}
 .btn-reset{background:none;border:0;color:var(--ink-faint);font-family:var(--ui);font-size:12px;cursor:pointer;padding:6px 12px;border-radius:7px;transition:.15s}
 .btn-reset:hover{color:var(--danger);background:rgba(200,71,47,.06)}
 .btn-reset.confirm{color:var(--danger);font-weight:700}

@@ -3,6 +3,11 @@ vi.mock('webextension-polyfill', () => ({ default: { runtime: {} } }));
 import browserMock from 'webextension-polyfill';
 import { settingsToState, stateToSettings, previewSize, mountSettingsUI } from '../src/ui/settings-ui.js';
 import { DEFAULTS } from '../src/lib/storage.js';
+import { MSG } from '../src/lib/messaging.js';
+
+// Existing assertions expect Korean; DEFAULTS.language is 'auto', so pin the
+// jsdom browser language to Korean for these tests.
+Object.defineProperty(navigator, 'language', { value: 'ko-KR', configurable: true });
 
 describe('settingsToState / stateToSettings', () => {
   it('round-trips the core fields', () => {
@@ -57,6 +62,38 @@ describe('mountSettingsUI', () => {
     expect(root.querySelector('#rWeight')).toBeTruthy();
     expect(root.querySelector('#save')).toBeTruthy();
     expect(document.body.classList.contains('ctx-popup')).toBe(true);
+  });
+
+  it('renders English when settings.language is en', () => {
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1,
+      settings: { ...DEFAULTS, language: 'en' } });
+    const krTitles = [...root.querySelectorAll('.sec-h .t.kr')].map((e) => e.textContent);
+    expect(krTitles).toContain('Exclude this site');
+    expect(krTitles).toContain('Protected fonts');
+    expect(root.querySelector('#save').textContent).toBe('Save');
+    expect(root.querySelector('#vWidth').textContent).toBe('Original');
+  });
+
+  it('persists the language and reloads when the selector changes (options only)', async () => {
+    const root = document.createElement('div');
+    const sent = [];
+    const reload = vi.fn();
+    mountSettingsUI(root, { context: 'options', currentHost: null, reload,
+      settings: { ...DEFAULTS }, send: (m) => { sent.push(m); return Promise.resolve({}); } });
+    const sel = root.querySelector('#langSel');
+    expect(root.querySelector('#langRow').hidden).toBe(false); // shown on options
+    sel.value = 'en';
+    sel.dispatchEvent(new Event('change'));
+    await Promise.resolve(); await Promise.resolve();
+    expect(sent).toContainEqual({ type: MSG.SAVE_SETTINGS, payload: { language: 'en' } });
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it('hides the language selector in the popup', () => {
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', tabId: 1, settings: { ...DEFAULTS } });
+    expect(root.querySelector('#langRow').hidden).toBe(true);
   });
 });
 
