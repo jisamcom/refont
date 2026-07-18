@@ -69,8 +69,10 @@ export function effectivePageUrl(loc = globalThis.location, doc = globalThis.doc
 
 // Specificity score for `raw` matching (hostname, pathname), or -1 if it doesn't
 // match. More specific = a longer entry hostname (an exact host beats a parent
-// domain), then a longer path. hostname length dominates (×1e5) so any path can't
-// out-rank a more specific host.
+// domain), then a port-qualified rule over an all-ports one, then a longer path.
+// hostname length dominates, then the port bonus, so neither the port nor any
+// bounded path can out-rank a more specific host. (Storage caps rules to a few
+// hundred chars, well under the port bonus, so the ordering is total.)
 function entryScore(target, hostname, pathname, raw) {
   const entry = parseEntry(raw);
   if (!entry || !entry.hostname) return -1;
@@ -78,7 +80,7 @@ function entryScore(target, hostname, pathname, raw) {
   if (!hostMatches) return -1;
   if (entry.port && entry.port !== target.port) return -1;
   if (entry.path && !(pathname === entry.path || pathname.startsWith(`${entry.path}/`))) return -1;
-  return entry.hostname.length * 100000 + (entry.path ? entry.path.length : 0);
+  return entry.hostname.length * 1000000 + (entry.port ? 500000 : 0) + (entry.path ? entry.path.length : 0);
 }
 
 // Best (most specific) matching entry's score for `url` in `list`, or -1 if none.
@@ -117,33 +119,45 @@ export function isBlocked(url, blocklist, allowlist = []) {
   return block > allow;
 }
 
-// Pure list math for the site on/off toggle. `enable` is the DESIRED state, so a
-// site blocked by a broader rule can be undone instead of gaining a redundant
-// exact-host block:
-//   enable=true  → drop an exact-host block; if a parent/path rule still catches
-//                  the URL, add a host allow-exception (which overrides the block).
-//   enable=false → drop any allow-exception; if nothing blocks the URL yet, add
-//                  an exact-host block.
-// Only OUR exact-host entries are ever added/removed — a user's parent/path rules
-// are never widened or deleted. Returns the next {blocklist, allowlist}; an
-// unparseable URL is a no-op.
+// Pure list math for the site on/off toggle. `enable` is the DESIRED state, and
+// the result is GUARANTEED to satisfy it — isBlocked(url, next) === !enable — even
+// when a path- or port-scoped rule is the most specific match. We drop our own
+// exact-host / exact-host+path entries for this URL, then, if the state hasn't
+// flipped, add the LEAST specific exception that out-ranks the top opposing rule:
+// the host first, escalating to host+path only when a more specific rule needs to
+// be beaten. A user's broader parent/prefix rules are never widened or deleted.
+// An unparseable URL is a no-op.
 export function computeSiteToggle(url, enable, blocklist = [], allowlist = []) {
   const bl = Array.isArray(blocklist) ? blocklist.slice() : [];
   const al = Array.isArray(allowlist) ? allowlist.slice() : [];
-  let host = '';
-  try { host = new URL(url).host.toLowerCase(); } catch { return { blocklist: bl, allowlist: al }; }
+  let u;
+  try { u = new URL(url); } catch { return { blocklist: bl, allowlist: al }; }
+  const host = u.host.toLowerCase();
+  const path = u.pathname.replace(/\/+$/, '');
+  const hostPath = path ? `${host}${path}` : host;
+  // The entries we own for this page (exact host, and exact host+path). Ordered
+  // least → most specific so we add the smallest exception that does the job.
+  const keys = hostPath === host ? [host] : [host, hostPath];
+  const without = (list) => list.filter((e) => !keys.includes(String(e).trim().toLowerCase()));
   const want = typeof enable === 'boolean' ? enable : isBlocked(url, bl, al);
-  const dropExact = (list) => { const i = list.indexOf(host); if (i >= 0) list.splice(i, 1); };
   if (want) {
-    // Want ON (not blocked): drop our exact block; if a broader rule still blocks,
-    // add an exact-host allow (more specific → wins). Otherwise clean a stray allow.
-    dropExact(bl);
-    if (isBlocked(url, bl, al)) { if (!al.includes(host)) al.push(host); } else dropExact(al);
-  } else {
-    // Want OFF (blocked): drop our exact allow; if nothing blocks yet (incl. a
-    // parent allow winning), add an exact-host block (most specific → wins).
-    dropExact(al);
-    if (!isBlocked(url, bl, al)) bl.push(host);
+    // Want ON (not blocked): drop our exact blocks; if a broader rule still blocks,
+    // add the least-specific allow exception that wins.
+    const nbl = without(bl);
+    if (!isBlocked(url, nbl, al)) return { blocklist: nbl, allowlist: without(al) };
+    for (const key of keys) {
+      const nal = without(al).concat(key);
+      if (!isBlocked(url, nbl, nal)) return { blocklist: nbl, allowlist: nal };
+    }
+    return { blocklist: nbl, allowlist: without(al).concat(hostPath) };
   }
-  return { blocklist: bl, allowlist: al };
+  // Want OFF (blocked): drop our exact allows (incl. one that exactly re-enabled
+  // this page); if nothing blocks yet, add the least-specific block that wins.
+  const nal = without(al);
+  if (isBlocked(url, bl, nal)) return { blocklist: bl, allowlist: nal };
+  for (const key of keys) {
+    const nbl = without(bl).concat(key);
+    if (isBlocked(url, nbl, nal)) return { blocklist: nbl, allowlist: nal };
+  }
+  return { blocklist: without(bl).concat(hostPath), allowlist: nal };
 }

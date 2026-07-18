@@ -23,6 +23,21 @@ describe('computeSiteToggle', () => {
   it('is a no-op for an unparseable URL', () => {
     expect(computeSiteToggle('not a url', true, ['x.com'], [])).toEqual({ blocklist: ['x.com'], allowlist: [] });
   });
+  // The core guarantee: after a toggle, the effective state matches the request.
+  const flips = (url, enable, bl = [], al = []) => {
+    const next = computeSiteToggle(url, enable, bl, al);
+    expect(isBlocked(url, next.blocklist, next.allowlist)).toBe(!enable);
+    return next;
+  };
+  it('actually flips a page blocked by a more-specific PATH rule (postcondition)', () => {
+    flips('https://example.com/admin/x', true, ['example.com/admin'], []); // turn ON despite /admin block
+    flips('https://example.com/admin', false, [], ['example.com/admin']);   // turn OFF despite /admin allow
+    flips('https://example.com/admin/deep', false, [], ['example.com/admin']); // OFF under a prefix allow
+  });
+  it('actually flips a page scoped by an explicit PORT rule (postcondition)', () => {
+    flips('http://example.com:3000/', true, ['example.com:3000'], []);      // ON despite :3000 block
+    flips('http://example.com:3000/', false, [], ['example.com:3000', 'example.com']); // OFF despite :3000 allow
+  });
   it('turns OFF a sub-host under an allowed parent by adding a more-specific block', () => {
     // block+allow both on example.com → whole domain currently re-enabled.
     const next = computeSiteToggle('https://sub.example.com/', false, ['example.com'], ['example.com']);
@@ -45,6 +60,12 @@ describe('isBlocked specificity (longest match wins)', () => {
   });
   it('allow wins on an exact same-target tie', () => {
     expect(isBlocked('https://example.com/', ['example.com'], ['example.com'])).toBe(false);
+  });
+  it('ranks an explicit port rule above an all-ports rule', () => {
+    // :3000 block is more specific than an all-ports allow → blocked.
+    expect(isBlocked('http://example.com:3000/', ['example.com:3000'], ['example.com'])).toBe(true);
+    // and the reverse: a :3000 allow beats an all-ports block.
+    expect(isBlocked('http://example.com:3000/', ['example.com'], ['example.com:3000'])).toBe(false);
   });
 });
 
