@@ -7,9 +7,9 @@ is readable.
 
 ## Environment
 
-- **Node.js** ≥ 22.12 (or ≥ 20.19 on the 20.x line) — the build toolchain (Vite 8,
-  pulled in by Vitest) requires it; also declared in `package.json` `engines.node`.
-  Developed and verified with v26.
+- **Node.js** 20.19+ (20.x), 22.12+ (22.x), or 24+ — the build toolchain (Vitest 4
+  and Vite 8) supports only these lines; Node 23 is excluded. Declared in
+  `package.json` `engines.node`. Developed and verified with v26.
 - **npm** (ships with Node.js)
 - No other system tools are required. All build dependencies are installed from
   npm via the committed `package-lock.json`.
