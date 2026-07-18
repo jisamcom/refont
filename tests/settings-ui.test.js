@@ -283,8 +283,9 @@ describe('scope + protection', () => {
   });
   it('operates the checkboxes and the site toggle by keyboard (Space/Enter)', () => {
     const root = document.createElement('div');
+    const sent = [];
     const api = mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', currentUrl: 'https://x.com/', tabId: 1,
-      blocked: false, settings: { ...DEFAULTS } });
+      blocked: false, settings: { ...DEFAULTS }, send: (m) => { sent.push(m); return Promise.resolve({}); } });
     const ck = root.querySelector('#ckPreserve');
     expect(ck.getAttribute('aria-checked')).toBe('true');
     ck.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
@@ -294,6 +295,17 @@ describe('scope + protection', () => {
     expect(toggle.classList.contains('on')).toBe(true);
     toggle.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     expect(toggle.classList.contains('on')).toBe(false); // Enter operated the switch
+    // Enter operating the switch must go through send() (no unhandled rejection).
+    expect(sent).toContainEqual({ type: MSG.TOGGLE_SITE, url: 'https://x.com/', enable: false });
+  });
+
+  it('tolerates a rejecting send() when the site toggle is clicked (no throw)', () => {
+    const root = document.createElement('div');
+    mountSettingsUI(root, { context: 'popup', currentHost: 'x.com', currentUrl: 'https://x.com/', tabId: 1,
+      blocked: false, settings: { ...DEFAULTS }, send: () => Promise.reject(new Error('no receiver')) });
+    const toggle = root.querySelector('#toggle');
+    expect(() => toggle.click()).not.toThrow();
+    expect(toggle.classList.contains('on')).toBe(false); // local state still updated
   });
 
   it('popup toggle shows the global-off state instead of claiming the site is on', () => {

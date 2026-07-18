@@ -836,7 +836,10 @@ export function mountSettingsUI(root, ctx) {
       const blEl = $('blocklist'); if (blEl) blEl.value = state.blocklist.join('\n');
       const alEl = $('allowlist'); if (alEl) alEl.value = state.allowlist.join('\n');
       renderToggle();
-      send({ type: MSG.TOGGLE_SITE, url, enable: siteOn });
+      // Fire-and-forget, but never let a rejected send() surface as an unhandled
+      // rejection (the popup has no error UI for a background toggle; the list math
+      // above already reflects the desired state and a later Save re-sends it).
+      Promise.resolve(send({ type: MSG.TOGGLE_SITE, url, enable: siteOn })).catch(() => {});
     });
   } else {
     let on = state.enabled !== false;
