@@ -113,49 +113,99 @@ export function fetchFontCached(url, fetchFn = fetch) {
   return p;
 }
 
+// Advance past a CSS string starting at `i` (src[i] is the opening quote),
+// honouring backslash escapes. Returns the index just past the closing quote.
+function skipCssString(src, i) {
+  const q = src[i];
+  i += 1;
+  for (; i < src.length; i += 1) {
+    if (src[i] === '\\') { i += 1; continue; }
+    if (src[i] === q) return i + 1;
+  }
+  return src.length;
+}
+
 // Extract only the @font-face rules from a stylesheet, dropping arbitrary
 // selectors, nested @import, @media, and any background-image/beacon requests. A
 // @font-face body holds only descriptors (family, src, weight, unicode-range…),
 // so passing the block through can't restyle the page — the sole external request
-// it can trigger is the font file itself. The scan is brace-matched and quote-
-// aware so a `}` inside a quoted url() can't truncate a block.
+// it can trigger is the font file itself. The scan tracks strings AND comments so
+// neither a `}` inside a quoted url() nor a `}` inside a `/* comment */` truncates
+// a block, and a commented-out `@font-face` is not mistaken for a real rule.
 export function extractFontFaces(cssText) {
   const src = String(cssText || '');
-  const re = /@font-face\s*\{/gi;
   const out = [];
-  let m;
-  while ((m = re.exec(src))) {
-    let i = re.lastIndex; // just past the opening brace
-    let depth = 1;
-    let quote = '';
-    for (; i < src.length; i += 1) {
-      const c = src[i];
-      if (quote) { if (c === quote && src[i - 1] !== '\\') quote = ''; continue; }
-      if (c === '"' || c === "'") { quote = c; continue; }
-      if (c === '{') depth += 1;
-      else if (c === '}') { depth -= 1; if (depth === 0) { i += 1; break; } }
+  const n = src.length;
+  let i = 0;
+  while (i < n) {
+    if (src[i] === '/' && src[i + 1] === '*') {
+      const end = src.indexOf('*/', i + 2);
+      i = end === -1 ? n : end + 2;
+      continue;
     }
-    out.push(src.slice(m.index, i));
-    re.lastIndex = i;
+    if (src[i] === '"' || src[i] === "'") { i = skipCssString(src, i); continue; }
+    // A real @font-face rule: the token, then optional whitespace, then `{`.
+    if (src[i] === '@' && /^@font-face\s*\{/i.test(src.slice(i, i + 40))) {
+      const start = i;
+      let j = i;
+      while (src[j] !== '{') j += 1;
+      j += 1; // past the opening brace
+      let depth = 1;
+      while (j < n && depth > 0) {
+        const c = src[j];
+        if (c === '/' && src[j + 1] === '*') {
+          const end = src.indexOf('*/', j + 2);
+          j = end === -1 ? n : end + 2;
+          continue;
+        }
+        if (c === '"' || c === "'") { j = skipCssString(src, j); continue; }
+        if (c === '{') depth += 1;
+        else if (c === '}') depth -= 1;
+        j += 1;
+      }
+      out.push(src.slice(start, j));
+      i = j;
+      continue;
+    }
+    i += 1;
   }
   return out.join('\n');
 }
 
-// Cap on a fetched webfont stylesheet (text). Google Fonts CSS is a few KB; this
-// bounds a hostile URL that streams megabytes of CSS.
+// Rewrite relative url(...) references to absolute, resolved against the
+// stylesheet's own (post-redirect) address. The extracted rules are injected into
+// the VISITED page's <style>, where a relative `url(../f.woff2)` would otherwise
+// resolve against the page — not the font host — and 404. Google Fonts ships
+// absolute URLs (unaffected); a generic CDN stylesheet often ships relative ones.
+// data:/blob: refs and anything that fails to resolve are left untouched.
+export function absolutizeFontUrls(cssText, baseUrl) {
+  const src = String(cssText || '');
+  if (!baseUrl) return src;
+  return src.replace(/url\(\s*(['"]?)([^'")]*)\1\s*\)/gi, (whole, q, ref) => {
+    const v = ref.trim();
+    if (!v || /^(?:data|blob):/i.test(v)) return whole;
+    try { return `url(${q}${new URL(v, baseUrl).href}${q})`; } catch { return whole; }
+  });
+}
+
+// Cap on a fetched webfont stylesheet. Google Fonts CSS is a few KB; this bounds a
+// hostile URL that streams megabytes of CSS.
 export const MAX_FONT_CSS_BYTES = 512 * 1024;
 
 // Fetch a webfont "CSS link" in the background (extension origin — no page
-// cookies) and return ONLY its @font-face rules. This replaces a page-side
-// @import, which would pull the whole remote author stylesheet into the page.
+// cookies) and return ONLY its @font-face rules, with relative font URLs made
+// absolute. This replaces a page-side @import, which would pull the whole remote
+// author stylesheet into the page. The download is stream-capped so a URL with a
+// missing/false Content-Length can't buffer megabytes before the size check.
 export async function fetchFontCss(url, fetchFn = fetch) {
   const res = await fetchFn(url);
   if (!res.ok) throw new Error(`css fetch failed: ${res.status}`);
   const declared = Number(header(res, 'content-length'));
   if (declared > MAX_FONT_CSS_BYTES) throw new Error(`css too large: ${declared} bytes`);
-  const text = await res.text();
-  if (text.length > MAX_FONT_CSS_BYTES) throw new Error(`css too large: ${text.length} bytes`);
-  return extractFontFaces(text);
+  const buf = await readResponseLimited(res, MAX_FONT_CSS_BYTES);
+  const text = new TextDecoder('utf-8').decode(buf);
+  const faces = extractFontFaces(text);
+  return absolutizeFontUrls(faces, res.url || url);
 }
 
 // One fetch per stylesheet URL per worker lifetime (all_frames amplification), an

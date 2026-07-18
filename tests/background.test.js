@@ -10,7 +10,7 @@ import {
   guessFontMime, arrayBufferToBase64, fetchFontAsDataUrl, cssTarget,
   replaceCssSerialized, registerCssOwner, purgeTabCss, __cssStateSize,
   classifyFontResponse, fetchFontCached, MAX_FONT_BYTES, MAX_FONT_CACHE_ENTRIES,
-  extractFontFaces, fetchFontCss, MAX_FONT_CSS_BYTES,
+  extractFontFaces, absolutizeFontUrls, fetchFontCss, MAX_FONT_CSS_BYTES,
 } from '../src/background.js';
 
 describe('extractFontFaces', () => {
@@ -40,28 +40,79 @@ describe('extractFontFaces', () => {
     expect(extractFontFaces('body{color:red} @media print{a{x:y}}')).toBe('');
     expect(extractFontFaces('')).toBe('');
   });
+  it('does not let a `}` inside a comment truncate the block', () => {
+    const css = `@font-face { /* fallback } marker */ font-family:X; src:url(x.woff2) } .after{color:red}`;
+    const out = extractFontFaces(css);
+    expect(out).toContain('font-family:X');
+    expect(out).toContain('x.woff2');
+    expect(out).not.toMatch(/\.after/);
+  });
+  it('ignores a commented-out @font-face', () => {
+    const css = `/* @font-face { font-family: Ghost; src: url(ghost.woff2) } */ .x{color:red}`;
+    expect(extractFontFaces(css)).toBe('');
+  });
+});
+
+describe('absolutizeFontUrls', () => {
+  const base = 'https://cdn.test/fonts/site.css';
+  it('resolves relative src urls against the stylesheet address', () => {
+    const out = absolutizeFontUrls('@font-face{src:url(../f/a.woff2)}', base);
+    expect(out).toContain('url(https://cdn.test/f/a.woff2)');
+  });
+  it('preserves quote style and resolves quoted refs', () => {
+    expect(absolutizeFontUrls('src:url("a.woff2")', base)).toContain('url("https://cdn.test/fonts/a.woff2")');
+    expect(absolutizeFontUrls("src:url('a.woff2')", base)).toContain("url('https://cdn.test/fonts/a.woff2')");
+  });
+  it('leaves absolute, data:, and blob: urls untouched', () => {
+    expect(absolutizeFontUrls('url(https://x.test/a.woff2)', base)).toContain('url(https://x.test/a.woff2)');
+    expect(absolutizeFontUrls('url(data:font/woff2;base64,AA)', base)).toContain('url(data:font/woff2;base64,AA)');
+  });
 });
 
 describe('fetchFontCss', () => {
-  const res = (text, { contentLength } = {}) => ({
+  const res = (text, { contentLength, url } = {}) => ({
     ok: true, status: 200,
+    url: url || 'https://fonts.googleapis.com/css2?family=R',
     headers: new Map(contentLength != null ? [['content-length', String(contentLength)]] : []),
-    text: async () => text,
+    arrayBuffer: async () => new TextEncoder().encode(text).buffer,
   });
   it('fetches a stylesheet and returns only its @font-face rules', async () => {
-    const css = `a{color:red} @font-face{font-family:"R";src:url(x.woff2)}`;
+    const css = `a{color:red} @font-face{font-family:"R";src:url(https://fonts.gstatic.com/r.woff2)}`;
     const out = await fetchFontCss('https://fonts.googleapis.com/css2?family=R', async () => res(css));
-    expect(out).toBe('@font-face{font-family:"R";src:url(x.woff2)}');
+    expect(out).toBe('@font-face{font-family:"R";src:url(https://fonts.gstatic.com/r.woff2)}');
+  });
+  it('absolutizes relative font urls against the final (post-redirect) response url', async () => {
+    const css = `@font-face{font-family:"R";src:url(../f/a.woff2)}`;
+    const out = await fetchFontCss('https://cdn.test/redirect', async () => res(css, { url: 'https://cdn.test/css/site.css' }));
+    expect(out).toContain('url(https://cdn.test/f/a.woff2)');
   });
   it('rejects an oversized stylesheet by declared length before reading', async () => {
     let read = false;
     const fakeFetch = async () => ({
       ok: true, status: 200,
       headers: new Map([['content-length', String(MAX_FONT_CSS_BYTES + 1)]]),
-      text: async () => { read = true; return ''; },
+      arrayBuffer: async () => { read = true; return new Uint8Array([1]).buffer; },
     });
     await expect(fetchFontCss('https://x/css', fakeFetch)).rejects.toThrow(/large/);
     expect(read).toBe(false);
+  });
+  it('stream-caps a stylesheet with no/false Content-Length', async () => {
+    let cancelled = false;
+    const chunk = new Uint8Array(Math.ceil(MAX_FONT_CSS_BYTES / 2) + 1);
+    let reads = 0;
+    const reader = {
+      read: async () => { reads += 1; return reads <= 2 ? { done: false, value: chunk } : { done: true }; },
+      cancel: async () => { cancelled = true; },
+      releaseLock: () => {},
+    };
+    const fakeFetch = async () => ({
+      ok: true, status: 200, url: 'https://x/css',
+      headers: new Map(),
+      body: { getReader: () => reader },
+      arrayBuffer: async () => { throw new Error('must stream'); },
+    });
+    await expect(fetchFontCss('https://x/css', fakeFetch)).rejects.toThrow(/large/);
+    expect(cancelled).toBe(true);
   });
   it('throws on an http error', async () => {
     await expect(fetchFontCss('https://x/css', async () => ({ ok: false, status: 404 }))).rejects.toThrow(/404/);
